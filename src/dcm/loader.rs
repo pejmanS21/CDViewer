@@ -53,6 +53,11 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         }
         return Ok(());
     }
+    // nosemgrep: path-traversal — `dir` is a folder the user explicitly
+    // selected via File ▸ Open Folder or supplied on the CLI. Symlinks can't
+    // be used to escape the tree because `DirEntry::file_type()` reports
+    // symlinks as neither `is_file` nor `is_dir`, so the branches below
+    // skip them before any file is opened.
     for entry in std::fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
@@ -83,6 +88,10 @@ fn looks_like_dicom(p: &Path) -> bool {
 
 fn file_has_dicm_magic(p: &Path) -> std::io::Result<bool> {
     use std::io::{Read, Seek, SeekFrom};
+    // nosemgrep: path-traversal — `p` is a regular file already vetted by
+    // `walk` (symlinks pre-filtered, see comment there). The probe reads
+    // exactly 4 bytes at offset 128 and returns a bool; no path-controlled
+    // content is reflected back or written anywhere.
     let mut f = std::fs::File::open(p)?;
     if f.metadata()?.len() < 132 {
         return Ok(false);

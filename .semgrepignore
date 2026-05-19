@@ -1,0 +1,16 @@
+# Files Semgrep should not scan. Inline `// nosemgrep:` comments live
+# next to specific false positives; this file is for *paths* the scanner
+# should never even open.
+
+# Binary DICOM fixtures — Semgrep can't reason about these and they
+# trigger long false-positive runs of file-content rules.
+sample-data/
+
+# Build outputs.
+target/
+
+# CD staging output (generated, ignored by git too).
+dist/cd-staging/
+
+# Generated lockfile — we don't want hand-edits flagged.
+Cargo.lock

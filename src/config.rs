@@ -114,6 +114,10 @@ impl Config {
         if !path.exists() {
             return Ok(Self::default());
         }
+        // nosemgrep: path-traversal — `path` is composed from `paths.data_dir`,
+        // which is derived from `std::env::current_exe()` or the platform
+        // user-data dir (see `Paths::resolve`). There is no untrusted input
+        // along this code path; this is a desktop binary, not an HTTP handler.
         let text =
             fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         let cfg: Self =

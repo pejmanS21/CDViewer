@@ -86,35 +86,38 @@ jobs:
 
       - name: Stage payload
         shell: bash
+        # Route every templated value through env. `github.event.inputs.tag`
+        # is user-supplied via workflow_dispatch and would otherwise be
+        # spliced into the bash literal at expansion time — shell-injection
+        # vector. Matrix values are author-controlled but follow the same
+        # pattern so a future contributor can't accidentally introduce one.
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ matrix.bin }}
+          ARCHIVE: ${{ matrix.archive }}
         run: |
           set -euo pipefail
-          # Derive the version label: prefer the pushed tag, else workflow
-          # input, else the crate's package version.
           if [[ -n "${GITHUB_REF_NAME-}" && "$GITHUB_REF_NAME" == v* ]]; then
             ver="$GITHUB_REF_NAME"
-          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            ver="${{ github.event.inputs.tag }}"
+          elif [[ -n "$INPUT_TAG" ]]; then
+            ver="$INPUT_TAG"
           else
             ver="v$(grep -E '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
           fi
-          name="dicom-viewer-${ver}-${{ matrix.target }}"
+          name="dicom-viewer-${ver}-${TARGET}"
           stage="dist/release/${name}"
           mkdir -p "$stage"
 
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$stage/"
-          # Common assets — silently skip missing ones so this stays
-          # forward-compatible with future README/LICENSE additions.
+          cp "target/${TARGET}/release/${BIN}" "$stage/"
           for f in dist/README.txt dist/HELP.txt LICENSE LICENSE-MIT LICENSE-APACHE; do
             [[ -f "$f" ]] && cp "$f" "$stage/" || true
           done
-          # Windows-only: ship the AutoPlay manifest alongside the exe so
-          # the same archive can be dropped onto a CD-staging area.
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp dist/autorun.inf "$stage/" || true
           fi
 
-          # Archive it.
-          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+          if [[ "$ARCHIVE" == "zip" ]]; then
             (cd dist/release && 7z a -tzip "../${name}.zip" "${name}" >/dev/null)
             echo "ARTIFACT=dist/${name}.zip" >> "$GITHUB_ENV"
           else
