@@ -7,7 +7,7 @@ on:
   schedule:
     # Weekly sweep so the latest Semgrep / Gitleaks rulesets still grade
     # the existing history clean even if nothing has changed.
-    - cron: '0 6 * * 1'
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 permissions:
@@ -40,41 +40,16 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: true
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: true
 
-  # ---- Static application security testing -----------------------------
   semgrep:
-    name: semgrep
+    name: semgrep/ci
     runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep:latest
     permissions:
       contents: read
-      security-events: write
-    # Dependabot can't read secrets, so opt it out cleanly.
+    env:
+      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+    container:
+      image: semgrep/semgrep
     if: (github.actor != 'dependabot[bot]')
     steps:
       - uses: actions/checkout@v4
-
-      - name: Run Semgrep
-        # `--config=auto` fetches Semgrep's curated ruleset for every
-        # detected language (Rust included). `--severity=ERROR` plus
-        # `--error` gates the build only on high-severity findings —
-        # noise-level lints still appear in SARIF for review.
-        run: |
-          semgrep scan \
-            --config=auto \
-            --sarif-output=semgrep.sarif \
-            --metrics=off \
-            --error \
-            --severity=ERROR
-        env:
-          # Optional. Without it, Semgrep runs the community ruleset
-          # locally. With it, findings are also reported to your
-          # Semgrep Cloud dashboard / custom policies.
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-
-      - name: Upload SARIF to GitHub Code Scanning
-        if: always()      # surface findings even when the scan failed
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-          category: semgrep
+      - run: semgrep ci
