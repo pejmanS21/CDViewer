@@ -669,19 +669,18 @@ fn handle_measurement(
             }
             if resp.drag_stopped() {
                 if let Some(prog) = app.ui_state.in_progress.take() {
+                    // Drop sub-pixel "rectangles" — they're a single click,
+                    // not an intentional ROI. Match guards keep clippy
+                    // `collapsible_match` happy on Rust 1.95+.
+                    let is_significant = |start: [f32; 2], cur: [f32; 2]| {
+                        (cur[0] - start[0]).abs() > 2.0 || (cur[1] - start[1]).abs() > 2.0
+                    };
                     match prog {
-                        InProgress::RectDrag { start, cur } => {
-                            if (cur[0] - start[0]).abs() > 2.0 || (cur[1] - start[1]).abs() > 2.0 {
-                                app.push_annotation(uid, Annotation::Rect { p1: start, p2: cur });
-                            }
+                        InProgress::RectDrag { start, cur } if is_significant(start, cur) => {
+                            app.push_annotation(uid, Annotation::Rect { p1: start, p2: cur });
                         }
-                        InProgress::EllipseDrag { start, cur } => {
-                            if (cur[0] - start[0]).abs() > 2.0 || (cur[1] - start[1]).abs() > 2.0 {
-                                app.push_annotation(
-                                    uid,
-                                    Annotation::Ellipse { p1: start, p2: cur },
-                                );
-                            }
+                        InProgress::EllipseDrag { start, cur } if is_significant(start, cur) => {
+                            app.push_annotation(uid, Annotation::Ellipse { p1: start, p2: cur });
                         }
                         _ => {}
                     }

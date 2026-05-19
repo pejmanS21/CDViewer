@@ -18,12 +18,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ---- Linux ------------------------------------------------------
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            test: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            test: true
+
+          # ---- macOS ------------------------------------------------------
+          - target: x86_64-apple-darwin
+            os: macos-13
+            test: true
           - target: aarch64-apple-darwin
             os: macos-14
+            test: true
+
+          # ---- Windows ----------------------------------------------------
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            test: true
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            test: false       # cross-compiled — can't execute aarch64 on x64
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +62,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-          components: clippy, rustfmt
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,6 +72,5 @@ jobs:
         run: cargo clippy --all-targets --all-features --target ${{ matrix.target }} -- -D warnings
 
       - name: Tests
-        # Integration tests in tests/sample_data.rs exercise the bundled
-        # sample-data/ fixtures; they auto-skip cleanly if missing.
+        if: matrix.test
         run: cargo test --all-features --target ${{ matrix.target }}
