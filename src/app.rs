@@ -199,8 +199,14 @@ impl DicomViewerApp {
                 for c in &mut self.cells {
                     *c = CellState::default();
                 }
-                // Auto-select first study/series for first cell.
-                if !self.studies.is_empty() && !self.studies[0].series.is_empty() {
+                // Auto-arrange: try MG hanging protocol across the whole
+                // study first (handles 4-series-of-1-instance layouts that
+                // the per-series ≥4 check in `select_series` would miss),
+                // otherwise drop the first series into the first cell.
+                if !self.studies.is_empty()
+                    && !self.try_arrange_mg_study(0)
+                    && !self.studies[0].series.is_empty()
+                {
                     self.select_series(0, 0);
                 }
                 tracing::info!(studies = self.studies.len(), "loaded folder");
@@ -218,9 +224,14 @@ impl DicomViewerApp {
         }
     }
 
-    /// Click on a series in the sidebar. MG with ≥4 views auto-fills 2×2;
-    /// everything else goes to the active cell.
+    /// Click on a series in the sidebar. First tries the MG hanging
+    /// protocol across the whole study (covers the 4-series-of-1-instance
+    /// case). If that doesn't apply, falls back to single-series MG (≥4
+    /// instances in this series) or assigning to the active cell.
     pub fn select_series(&mut self, study_idx: usize, series_idx: usize) {
+        if self.is_mg_study(study_idx) && self.try_arrange_mg_study(study_idx) {
+            return;
+        }
         let (is_mg, order) = match self
             .studies
             .get(study_idx)
@@ -242,6 +253,79 @@ impl DicomViewerApp {
             let cell = self.active_cell.min(self.cells.len().saturating_sub(1));
             self.cells[cell].assign((study_idx, series_idx), 0);
         }
+    }
+
+    /// Does this study contain any MG-modality series?
+    fn is_mg_study(&self, study_idx: usize) -> bool {
+        self.studies
+            .get(study_idx)
+            .map(|s| s.series.iter().any(|se| se.is_mammography()))
+            .unwrap_or(false)
+    }
+
+    /// Look across every MG series in the study and assemble a 2×2 layout
+    /// when there's at least one right-breast and one left-breast view.
+    ///
+    /// Placement priority:
+    /// 1. Strict — RCC, LCC, RMLO, LMLO all present: place in that order.
+    /// 2. View-known — at least 2 R and 2 L with `ViewPosition` set: sort
+    ///    each side's queue by view (CC before MLO) so the top row is the
+    ///    cranio-caudal pair.
+    /// 3. Laterality-only — at least 2 R and 2 L but `ViewPosition` is
+    ///    missing (common in some PACS exports): pair in series/instance
+    ///    order.
+    pub fn try_arrange_mg_study(&mut self, study_idx: usize) -> bool {
+        let Some(study) = self.studies.get(study_idx) else {
+            return false;
+        };
+
+        // (view_priority, series_idx, instance_idx). view_priority sorts
+        // CC < MLO < unknown so CCs end up on the top row when known.
+        let mut rights: Vec<(u8, usize, usize)> = Vec::new();
+        let mut lefts: Vec<(u8, usize, usize)> = Vec::new();
+        for (si, series) in study.series.iter().enumerate() {
+            if !series.is_mammography() {
+                continue;
+            }
+            for (ii, inst) in series.instances.iter().enumerate() {
+                let side = match inst.image_laterality.as_deref() {
+                    Some("R") => &mut rights,
+                    Some("L") => &mut lefts,
+                    _ => continue,
+                };
+                let vp = match inst.view_position.as_deref() {
+                    Some("CC") => 0u8,
+                    Some("MLO") => 1u8,
+                    _ => 2u8,
+                };
+                side.push((vp, si, ii));
+            }
+        }
+        if rights.len() < 2 || lefts.len() < 2 {
+            return false;
+        }
+        rights.sort_by_key(|&(vp, si, ii)| (vp, si, ii));
+        lefts.sort_by_key(|&(vp, si, ii)| (vp, si, ii));
+
+        self.set_grid(GridLayout::TwoByTwo);
+        let pick = |v: &[(u8, usize, usize)], idx: usize| (v[idx].1, v[idx].2);
+        let (r0_si, r0_ii) = pick(&rights, 0);
+        let (l0_si, l0_ii) = pick(&lefts, 0);
+        let (r1_si, r1_ii) = pick(&rights, 1);
+        let (l1_si, l1_ii) = pick(&lefts, 1);
+
+        self.cells[0].assign((study_idx, r0_si), r0_ii);
+        self.cells[1].assign((study_idx, l0_si), l0_ii);
+        self.cells[2].assign((study_idx, r1_si), r1_ii);
+        self.cells[3].assign((study_idx, l1_si), l1_ii);
+        self.active_cell = 0;
+        tracing::info!(
+            study_idx,
+            r = rights.len(),
+            l = lefts.len(),
+            "applied MG hanging protocol (study-level)"
+        );
+        true
     }
 
     /// Queue a drag-drop assignment. Validated now (so we don't push
