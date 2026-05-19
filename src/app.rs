@@ -48,31 +48,6 @@ pub struct DicomViewerApp {
     pending_startup: Option<PathBuf>,
 }
 
-/// How the image is sized relative to its cell rect.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum FitMode {
-    /// Default: fit the image inside the cell, preserving aspect. The
-    /// smaller axis fills exactly; the other has a dark margin.
-    #[default]
-    Contain,
-    /// Mammography hanging protocol: scale so the image height equals
-    /// the cell height. Width may underflow on landscape windows (dark
-    /// margin on the outer side of the cell), which is the standard
-    /// MG-workstation look and keeps the breast un-cropped.
-    Height,
-}
-
-/// Horizontal anchor inside the cell rect when the image doesn't fill the
-/// cell width. MG cells anchor the chest-wall side to the inner edge of
-/// the 2×2 (Right for right breasts, Left for left breasts).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum HAnchor {
-    #[default]
-    Center,
-    Left,
-    Right,
-}
-
 /// All viewport state belongs to a cell, so transforms persist when
 /// switching layouts and so dragging a different series onto a cell
 /// resets only that cell.
@@ -87,10 +62,6 @@ pub struct CellState {
     pub flip_v: bool,
     pub invert: bool,
     pub window: Option<(f64, f64)>,
-    /// Fit mode + horizontal anchor are set by `apply_mg_hanging` and
-    /// stay at their defaults for every other modality.
-    pub fit_mode: FitMode,
-    pub h_anchor: HAnchor,
     pub error: Option<String>,
     // Cached uploaded texture, keyed by (uid, window, invert) so we know
     // when to regenerate.
@@ -98,13 +69,6 @@ pub struct CellState {
     pub tex_uid: Option<String>,
     pub tex_window: Option<(f64, f64)>,
     pub tex_invert: bool,
-}
-
-/// Which breast the cell holds — drives the hanging protocol.
-#[derive(Debug, Clone, Copy)]
-pub enum MgSide {
-    Right,
-    Left,
 }
 
 impl Default for CellState {
@@ -119,8 +83,6 @@ impl Default for CellState {
             flip_v: false,
             invert: false,
             window: None,
-            fit_mode: FitMode::default(),
-            h_anchor: HAnchor::default(),
             error: None,
             tex: None,
             tex_uid: None,
@@ -139,8 +101,6 @@ impl CellState {
         self.flip_v = false;
         self.invert = false;
         self.window = None;
-        self.fit_mode = FitMode::default();
-        self.h_anchor = HAnchor::default();
         // Texture stays cached unless invert/window changed; the renderer
         // notices the mismatch and regenerates.
     }
@@ -149,23 +109,6 @@ impl CellState {
         *self = CellState::default();
         self.series_ref = Some(series_ref);
         self.slice = slice;
-    }
-
-    /// Configure this cell for the MG hanging protocol: fit-to-height,
-    /// chest-wall anchored to the inner edge of the 2×2, left breasts
-    /// mirrored so chest walls face each other.
-    pub fn apply_mg_hanging(&mut self, side: MgSide) {
-        self.fit_mode = FitMode::Height;
-        match side {
-            MgSide::Right => {
-                self.flip_h = false;
-                self.h_anchor = HAnchor::Right;
-            }
-            MgSide::Left => {
-                self.flip_h = true;
-                self.h_anchor = HAnchor::Left;
-            }
-        }
     }
 }
 
@@ -256,13 +199,8 @@ impl DicomViewerApp {
                 for c in &mut self.cells {
                     *c = CellState::default();
                 }
-                // Auto-arrange: prefer MG hanging protocol across the
-                // whole study (handles 4-series-of-1-instance layouts too),
-                // otherwise drop the first series into the first cell.
-                if !self.studies.is_empty()
-                    && !self.try_arrange_mg_study(0)
-                    && !self.studies[0].series.is_empty()
-                {
+                // Auto-select first study/series for first cell.
+                if !self.studies.is_empty() && !self.studies[0].series.is_empty() {
                     self.select_series(0, 0);
                 }
                 tracing::info!(studies = self.studies.len(), "loaded folder");
@@ -280,17 +218,9 @@ impl DicomViewerApp {
         }
     }
 
-    /// Click on a series in the sidebar. First tries the MG hanging
-    /// protocol across the whole study (covers the 4-series-of-1-instance
-    /// case). If that doesn't apply, falls back to single-series MG (≥4
-    /// instances in this series) or assigning to the active cell.
+    /// Click on a series in the sidebar. MG with ≥4 views auto-fills 2×2;
+    /// everything else goes to the active cell.
     pub fn select_series(&mut self, study_idx: usize, series_idx: usize) {
-        // Whole-study MG: works regardless of whether the four views are
-        // packed in one series or split across four.
-        if self.is_mg_study(study_idx) && self.try_arrange_mg_study(study_idx) {
-            return;
-        }
-
         let (is_mg, order) = match self
             .studies
             .get(study_idx)
@@ -307,106 +237,11 @@ impl DicomViewerApp {
             for (cell_idx, slice_idx) in order.into_iter().enumerate().take(4) {
                 self.cells[cell_idx].assign((study_idx, series_idx), slice_idx);
             }
-            // Apply the hanging protocol so the chest walls face inward.
-            if let Some(series) = self.studies[study_idx].series.get(series_idx) {
-                for cell_idx in 0..4 {
-                    let inst_idx = self.cells[cell_idx].slice;
-                    if let Some(inst) = series.instances.get(inst_idx) {
-                        if let Some(side) = mg_side(inst) {
-                            self.cells[cell_idx].apply_mg_hanging(side);
-                        }
-                    }
-                }
-            }
             self.active_cell = 0;
         } else {
             let cell = self.active_cell.min(self.cells.len().saturating_sub(1));
             self.cells[cell].assign((study_idx, series_idx), 0);
         }
-    }
-
-    /// Does this study contain any MG-modality series?
-    fn is_mg_study(&self, study_idx: usize) -> bool {
-        self.studies
-            .get(study_idx)
-            .map(|s| s.series.iter().any(|se| se.is_mammography()))
-            .unwrap_or(false)
-    }
-
-    /// Look across every MG series in the study and assemble a 2×2
-    /// butterfly layout when there's at least one right-breast and one
-    /// left-breast view (the minimum needed to be useful).
-    ///
-    /// Three placement modes, in priority order:
-    /// 1. Strict — RCC, LCC, RMLO, LMLO all present: place in that order.
-    /// 2. View-known — at least 2 R and 2 L with `ViewPosition` set: sort
-    ///    each side's queue by view (CC before MLO) so the top row is the
-    ///    cranio-caudal pair.
-    /// 3. Laterality-only — at least 2 R and 2 L but `ViewPosition` is
-    ///    missing (common in some PACS exports): pair them in
-    ///    series/instance order.
-    ///
-    /// Every populated cell gets the hanging protocol applied (fit to
-    /// height, anchor chest wall to the inner edge of the 2×2, mirror
-    /// left breasts).
-    pub fn try_arrange_mg_study(&mut self, study_idx: usize) -> bool {
-        let Some(study) = self.studies.get(study_idx) else {
-            return false;
-        };
-
-        // (view_priority, series_idx, instance_idx). view_priority sorts
-        // CC < MLO < unknown so CCs end up on the top row when known.
-        let mut rights: Vec<(u8, usize, usize)> = Vec::new();
-        let mut lefts: Vec<(u8, usize, usize)> = Vec::new();
-        for (si, series) in study.series.iter().enumerate() {
-            if !series.is_mammography() {
-                continue;
-            }
-            for (ii, inst) in series.instances.iter().enumerate() {
-                let Some(side) = mg_side(inst) else {
-                    continue;
-                };
-                let vp = match inst.view_position.as_deref() {
-                    Some("CC") => 0u8,
-                    Some("MLO") => 1u8,
-                    _ => 2u8,
-                };
-                match side {
-                    MgSide::Right => rights.push((vp, si, ii)),
-                    MgSide::Left => lefts.push((vp, si, ii)),
-                }
-            }
-        }
-        if rights.len() < 2 || lefts.len() < 2 {
-            return false;
-        }
-        rights.sort_by_key(|&(vp, si, ii)| (vp, si, ii));
-        lefts.sort_by_key(|&(vp, si, ii)| (vp, si, ii));
-
-        self.set_grid(GridLayout::TwoByTwo);
-        let pick =
-            |v: &Vec<(u8, usize, usize)>, idx: usize| -> (usize, usize) { (v[idx].1, v[idx].2) };
-        let (r0_si, r0_ii) = pick(&rights, 0);
-        let (l0_si, l0_ii) = pick(&lefts, 0);
-        let (r1_si, r1_ii) = pick(&rights, 1);
-        let (l1_si, l1_ii) = pick(&lefts, 1);
-
-        self.cells[0].assign((study_idx, r0_si), r0_ii);
-        self.cells[0].apply_mg_hanging(MgSide::Right);
-        self.cells[1].assign((study_idx, l0_si), l0_ii);
-        self.cells[1].apply_mg_hanging(MgSide::Left);
-        self.cells[2].assign((study_idx, r1_si), r1_ii);
-        self.cells[2].apply_mg_hanging(MgSide::Right);
-        self.cells[3].assign((study_idx, l1_si), l1_ii);
-        self.cells[3].apply_mg_hanging(MgSide::Left);
-        self.active_cell = 0;
-        tracing::info!(
-            study_idx,
-            r = rights.len(),
-            l = lefts.len(),
-            "applied MG hanging protocol (study-level)"
-        );
-        true
     }
 
     /// Queue a drag-drop assignment. Validated now (so we don't push
@@ -592,16 +427,6 @@ fn mg_slice_order(series: &crate::dcm::Series) -> Vec<usize> {
         .collect();
     indexed.sort_by_key(|(k, _)| *k);
     indexed.into_iter().map(|(_, i)| i).collect()
-}
-
-/// Read which breast an MG instance shows. Used to set up the cell's
-/// chest-wall anchor + mirror flag.
-fn mg_side(inst: &crate::dcm::Instance) -> Option<MgSide> {
-    match inst.image_laterality.as_deref()? {
-        "R" => Some(MgSide::Right),
-        "L" => Some(MgSide::Left),
-        _ => None,
-    }
 }
 
 fn apply_visuals(ctx: &Context, _dark: bool) {

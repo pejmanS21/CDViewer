@@ -31,18 +31,7 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
                 .inner_margin(egui::Margin::same(2.0)),
         )
         .show(ctx, |ui| {
-            let outer = ui.available_rect_before_wrap();
-            // For MG hanging the cells should be *portrait* — sized to the
-            // image aspect — so the breasts fill each cell instead of
-            // leaving a big dark band on the outer side. The 2×2 super-grid
-            // is centred in `outer`; dark gutter falls outside the grid,
-            // never between the chest walls.
-            let avail = if let Some(aspect) = mg_layout_aspect(app) {
-                fit_mg_grid(outer, aspect)
-            } else {
-                outer
-            };
-
+            let avail = ui.available_rect_before_wrap();
             let (cols, rows) = app.grid.dims();
             let gap = 2.0;
             let cw = (avail.width() - gap * (cols as f32 - 1.0)) / cols as f32;
@@ -59,63 +48,8 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
                 let cell_rect = Rect::from_min_size(origin, Vec2::new(cw, ch));
                 draw_cell(ui, ctx, app, cell_idx, cell_rect);
             }
-            ui.allocate_rect(outer, Sense::hover());
+            ui.allocate_rect(avail, Sense::hover());
         });
-}
-
-/// `Some(image_aspect)` when every populated cell of a 2×2 grid is on the
-/// MG hanging protocol, otherwise `None`. The aspect is read from the
-/// first cell's instance (cols/rows). All four MG views from one study
-/// share the same dimensions in practice.
-fn mg_layout_aspect(app: &DicomViewerApp) -> Option<f32> {
-    use crate::app::FitMode;
-    use crate::ui::GridLayout;
-    if app.grid != GridLayout::TwoByTwo || app.cells.len() < 4 {
-        return None;
-    }
-    let all_mg = app
-        .cells
-        .iter()
-        .take(4)
-        .all(|c| c.series_ref.is_some() && c.fit_mode == FitMode::Height);
-    if !all_mg {
-        return None;
-    }
-    for cell in app.cells.iter().take(4) {
-        let (si, se) = cell.series_ref?;
-        let inst = app
-            .studies
-            .get(si)?
-            .series
-            .get(se)?
-            .instances
-            .get(cell.slice)?;
-        if inst.rows > 0 && inst.cols > 0 {
-            return Some(inst.cols as f32 / inst.rows as f32);
-        }
-    }
-    // Conservative fallback: typical mammography aspect.
-    Some(0.786)
-}
-
-/// Centre a 2×2 grid of cells with `cell_aspect = img_w/img_h` inside
-/// `outer`. Two cells side-by-side give the *grid* the same aspect as one
-/// cell, so we just scale that single ratio to fit.
-fn fit_mg_grid(outer: Rect, cell_aspect: f32) -> Rect {
-    let avail_aspect = outer.width() / outer.height().max(1.0);
-    let (w, h) = if avail_aspect > cell_aspect {
-        // Landscape: bound by height, leave gutter on left/right.
-        let h = outer.height();
-        let w = h * cell_aspect;
-        (w, h)
-    } else {
-        // Portrait: bound by width, leave gutter on top/bottom.
-        let w = outer.width();
-        let h = w / cell_aspect.max(0.01);
-        (w, h)
-    };
-    let c = outer.center();
-    Rect::from_center_size(c, Vec2::new(w, h))
 }
 
 fn draw_cell(ui: &mut Ui, ctx: &Context, app: &mut DicomViewerApp, cell_idx: usize, rect: Rect) {
@@ -497,26 +431,15 @@ fn ensure_texture(
 }
 
 fn compute_dst_rect(img_w: f32, img_h: f32, cell: &CellState, rect: Rect) -> Rect {
-    use crate::app::{FitMode, HAnchor};
     let (eff_w, eff_h) = if cell.rotation_quarter % 2 == 1 {
         (img_h, img_w)
     } else {
         (img_w, img_h)
     };
-    let scale = match cell.fit_mode {
-        FitMode::Contain => (rect.width() / eff_w.max(1.0)).min(rect.height() / eff_h.max(1.0)),
-        FitMode::Height => rect.height() / eff_h.max(1.0),
-    };
+    let scale = (rect.width() / eff_w.max(1.0)).min(rect.height() / eff_h.max(1.0));
     let z = scale * cell.zoom;
     let dst_size = Vec2::new(eff_w * z, eff_h * z);
-    // Anchor establishes the base x; user pan offsets from there. y is
-    // always centred (MG hanging only anchors horizontally).
-    let base_x = match cell.h_anchor {
-        HAnchor::Center => rect.center().x,
-        HAnchor::Left => rect.left() + dst_size.x * 0.5,
-        HAnchor::Right => rect.right() - dst_size.x * 0.5,
-    };
-    let center = egui::pos2(base_x + cell.pan.x, rect.center().y + cell.pan.y);
+    let center = rect.center() + cell.pan;
     Rect::from_center_size(center, dst_size)
 }
 
