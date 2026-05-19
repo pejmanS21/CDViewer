@@ -431,15 +431,26 @@ fn ensure_texture(
 }
 
 fn compute_dst_rect(img_w: f32, img_h: f32, cell: &CellState, rect: Rect) -> Rect {
+    use crate::app::{FitMode, HAnchor};
     let (eff_w, eff_h) = if cell.rotation_quarter % 2 == 1 {
         (img_h, img_w)
     } else {
         (img_w, img_h)
     };
-    let scale = (rect.width() / eff_w.max(1.0)).min(rect.height() / eff_h.max(1.0));
+    let scale = match cell.fit_mode {
+        FitMode::Contain => (rect.width() / eff_w.max(1.0)).min(rect.height() / eff_h.max(1.0)),
+        FitMode::Height => rect.height() / eff_h.max(1.0),
+    };
     let z = scale * cell.zoom;
     let dst_size = Vec2::new(eff_w * z, eff_h * z);
-    let center = rect.center() + cell.pan;
+    // Anchor establishes the base x; user pan offsets from there. y is
+    // always centred (MG hanging only anchors horizontally).
+    let base_x = match cell.h_anchor {
+        HAnchor::Center => rect.center().x,
+        HAnchor::Left => rect.left() + dst_size.x * 0.5,
+        HAnchor::Right => rect.right() - dst_size.x * 0.5,
+    };
+    let center = egui::pos2(base_x + cell.pan.x, rect.center().y + cell.pan.y);
     Rect::from_center_size(center, dst_size)
 }
 
