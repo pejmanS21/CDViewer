@@ -20,6 +20,9 @@ pub struct DicomViewerApp {
     pub raw_failures: HashMap<String, String>,
     pub metadata_cache: HashMap<String, Arc<Vec<TagRow>>>,
     pub metadata_filter: String,
+    /// Sidebar previews. Lazily populated one-per-frame so the UI never
+    /// stalls behind a chain of pixel decodes.
+    pub thumbnails: HashMap<String, ThumbnailState>,
 
     pub grid: GridLayout,
     pub cells: Vec<CellState>,
@@ -30,6 +33,19 @@ pub struct DicomViewerApp {
 
     pub last_error: Option<String>,
     pub last_info: Option<String>,
+
+    /// Drag-drop drops are deferred until the *next* frame. Applying them
+    /// inline during `viewport::draw` would free the cell's TextureHandle
+    /// while shapes referencing that texture are still in the current
+    /// frame's command buffer — wgpu panics with
+    /// "Texture … has been destroyed".
+    pending_drops: Vec<(usize, (usize, usize))>,
+
+    /// Folder to load on the first update tick. Set when the binary is
+    /// launched with a CLI arg, with `DICOM_VIEWER_DATA`, or from a CD
+    /// where a sibling `DICOM/` directory exists. Deferred so the window
+    /// paints once before the (potentially slow) folder scan runs.
+    pending_startup: Option<PathBuf>,
 }
 
 /// All viewport state belongs to a cell, so transforms persist when
@@ -97,7 +113,12 @@ impl CellState {
 }
 
 impl DicomViewerApp {
-    pub fn new(cc: &CreationContext<'_>, paths: Paths, config: Config) -> Self {
+    pub fn new(
+        cc: &CreationContext<'_>,
+        paths: Paths,
+        config: Config,
+        startup_folder: Option<PathBuf>,
+    ) -> Self {
         apply_visuals(&cc.egui_ctx, config.ui.dark_mode);
         let needs_disclaimer = !config.disclaimer_acknowledged;
         let ui_state = ui::UiState::new(needs_disclaimer, &config);
@@ -112,6 +133,7 @@ impl DicomViewerApp {
             raw_failures: HashMap::new(),
             metadata_cache: HashMap::new(),
             metadata_filter: String::new(),
+            thumbnails: HashMap::new(),
             grid: GridLayout::OneByOne,
             cells: vec![CellState::default()],
             active_cell: 0,
@@ -119,6 +141,8 @@ impl DicomViewerApp {
             annotations_path,
             last_error: None,
             last_info: None,
+            pending_drops: Vec::new(),
+            pending_startup: startup_folder,
         }
     }
 
@@ -171,6 +195,7 @@ impl DicomViewerApp {
                 self.raw_cache.clear();
                 self.raw_failures.clear();
                 self.metadata_cache.clear();
+                self.thumbnails.clear();
                 for c in &mut self.cells {
                     *c = CellState::default();
                 }
@@ -219,7 +244,9 @@ impl DicomViewerApp {
         }
     }
 
-    /// Drop a series onto a specific cell (drag-and-drop target).
+    /// Queue a drag-drop assignment. Validated now (so we don't push
+    /// garbage), applied next frame (so the cell's current TextureHandle
+    /// survives the rest of this frame's GPU submission).
     pub fn drop_series_onto_cell(&mut self, cell_idx: usize, series_ref: (usize, usize)) {
         if cell_idx >= self.cells.len() {
             tracing::warn!(cell_idx, len = self.cells.len(), "drop: cell out of range");
@@ -235,9 +262,26 @@ impl DicomViewerApp {
             tracing::warn!(si, se, "drop: invalid or empty series");
             return;
         }
-        tracing::info!(cell_idx, si, se, "drop series onto cell");
-        self.cells[cell_idx].assign(series_ref, 0);
-        self.active_cell = cell_idx;
+        tracing::info!(cell_idx, si, se, "queue drop series onto cell");
+        // Replace any earlier-queued drop for the same cell — last one wins.
+        self.pending_drops.retain(|(c, _)| *c != cell_idx);
+        self.pending_drops.push((cell_idx, series_ref));
+    }
+
+    /// Apply queued drops. Called at the *start* of each frame, before
+    /// any rendering, so dropping a CellState's old TextureHandle is safe.
+    fn flush_pending_drops(&mut self) {
+        if self.pending_drops.is_empty() {
+            return;
+        }
+        let drops = std::mem::take(&mut self.pending_drops);
+        for (cell_idx, series_ref) in drops {
+            if cell_idx >= self.cells.len() {
+                continue;
+            }
+            self.cells[cell_idx].assign(series_ref, 0);
+            self.active_cell = cell_idx;
+        }
     }
 
     pub fn raw_for(&mut self, sop_uid: &str, path: &Path) -> Option<Arc<RawImage>> {
@@ -255,7 +299,8 @@ impl DicomViewerApp {
             }
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "raw load failed");
-                self.raw_failures.insert(sop_uid.to_string(), format!("{e:#}"));
+                self.raw_failures
+                    .insert(sop_uid.to_string(), format!("{e:#}"));
                 None
             }
         }
@@ -290,6 +335,57 @@ impl DicomViewerApp {
         let (si, se) = cell.series_ref?;
         let series = self.studies.get(si)?.series.get(se)?;
         series.instances.get(cell.slice)
+    }
+
+    /// Sidebar asks per row: "do you have a thumbnail for this series?"
+    /// We register a `Pending` entry on first miss; the per-frame pump in
+    /// [`pump_thumbnails`] decodes one at a time.
+    pub fn thumbnail_for(&mut self, series_uid: &str) -> Option<TextureHandle> {
+        match self.thumbnails.get(series_uid) {
+            Some(ThumbnailState::Ready(t)) => Some(t.clone()),
+            Some(_) => None,
+            None => {
+                self.thumbnails
+                    .insert(series_uid.to_string(), ThumbnailState::Pending);
+                None
+            }
+        }
+    }
+
+    /// Decode at most one pending sidebar thumbnail per frame, so the UI
+    /// thread isn't blocked by a long chain of MG-sized decodes.
+    pub fn pump_thumbnails(&mut self, ctx: &Context) {
+        let next: Option<(String, PathBuf)> = self
+            .thumbnails
+            .iter()
+            .find_map(|(uid, state)| matches!(state, ThumbnailState::Pending).then(|| uid.clone()))
+            .and_then(|uid| {
+                self.studies
+                    .iter()
+                    .flat_map(|s| s.series.iter())
+                    .find(|se| se.series_instance_uid == uid)
+                    .and_then(|s| s.instances.first())
+                    .map(|inst| (uid, inst.path.clone()))
+            });
+        let Some((uid, path)) = next else {
+            return;
+        };
+        match crate::dcm::thumbnail::load_thumbnail(&path, 96) {
+            Ok(t) => {
+                let img = egui::ColorImage::from_rgba_unmultiplied(
+                    [t.width as usize, t.height as usize],
+                    &t.rgba,
+                );
+                let tex =
+                    ctx.load_texture(format!("thumb-{uid}"), img, egui::TextureOptions::LINEAR);
+                self.thumbnails.insert(uid, ThumbnailState::Ready(tex));
+            }
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "thumbnail failed");
+                self.thumbnails.insert(uid, ThumbnailState::Failed);
+            }
+        }
+        ctx.request_repaint();
     }
 
     pub fn metadata_for(&mut self, sop_uid: &str, path: &Path) -> Option<Arc<Vec<TagRow>>> {
@@ -333,18 +429,38 @@ fn mg_slice_order(series: &crate::dcm::Series) -> Vec<usize> {
     indexed.into_iter().map(|(_, i)| i).collect()
 }
 
-fn apply_visuals(ctx: &Context, dark: bool) {
-    if dark {
-        ctx.set_visuals(egui::Visuals::dark());
-    } else {
-        ctx.set_visuals(egui::Visuals::light());
-    }
+fn apply_visuals(ctx: &Context, _dark: bool) {
+    // The Workstation Noir theme is dark-only by design — light mode would
+    // break the radiograph-glow accent that anchors the whole palette.
+    crate::ui::theme::install(ctx);
+}
+
+/// Lifecycle of a sidebar series thumbnail.
+pub enum ThumbnailState {
+    Pending,
+    Ready(TextureHandle),
+    Failed,
 }
 
 impl eframe::App for DicomViewerApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // CRITICAL: apply drops queued by last frame *before* rendering.
+        // See `pending_drops` doc comment — dropping a TextureHandle
+        // mid-frame triggers a wgpu "texture destroyed" panic.
+        self.flush_pending_drops();
         self.handle_dropped_files(ctx);
+        // Auto-load on first frame so the empty UI shows for one tick
+        // before the (potentially CD-slow) folder scan begins.
+        if let Some(folder) = self.pending_startup.take() {
+            self.last_info = Some(format!("Loading {} …", folder.display()));
+            tracing::info!(path = %folder.display(), "autoload startup folder");
+            self.open_folder(&folder);
+            ctx.request_repaint();
+        }
         ui::draw(ctx, self);
+        // After the UI registered any new Pending thumbnails, decode at
+        // most one this frame and request a repaint if there's more work.
+        self.pump_thumbnails(ctx);
     }
 
     fn on_exit(&mut self) {

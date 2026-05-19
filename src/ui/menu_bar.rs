@@ -1,85 +1,102 @@
 use crate::app::DicomViewerApp;
 use crate::dcm::{self, auto_window};
-use egui::{Context, TopBottomPanel};
+use crate::ui::theme;
+use egui::{Context, FontId, Frame, Margin, RichText, Stroke, TopBottomPanel};
 
 pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
-    TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-        egui::menu::bar(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Open File…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("DICOM", &["dcm", "dicom"])
-                        .pick_file()
-                    {
-                        app.open_file(&p);
-                    }
-                    ui.close_menu();
-                }
-                if ui.button("Open Folder…").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                        app.open_folder(&p);
-                    }
-                    ui.close_menu();
-                }
-                ui.separator();
-                ui.menu_button("Export", |ui| {
-                    if ui.button("Current view → PNG…").clicked() {
-                        export_current_view(app, false);
-                        ui.close_menu();
-                    }
-                    if ui
-                        .button("Current view → PNG (with annotations)…")
-                        .clicked()
-                    {
-                        export_current_view(app, true);
-                        ui.close_menu();
-                    }
-                    if ui.button("Current series → PNG sequence…").clicked() {
-                        export_series_pngs(app, false);
-                        ui.close_menu();
-                    }
-                    if ui
-                        .button("Current series → PNG sequence (with annotations)…")
-                        .clicked()
-                    {
-                        export_series_pngs(app, true);
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Anonymize active study → folder…").clicked() {
-                        anonymize_active_study(app);
-                        ui.close_menu();
-                    }
+    TopBottomPanel::top("menu_bar")
+        .frame(
+            Frame::default()
+                .fill(theme::BG_DEEP)
+                .stroke(Stroke::new(1.0, theme::LINE))
+                .inner_margin(Margin::symmetric(10.0, 4.0)),
+        )
+        .show(ctx, |ui| {
+            // Small wordmark on the left — gives the app a brand presence
+            // without leaning on a logo image.
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("◈ DICOM")
+                        .font(FontId::monospace(12.0))
+                        .color(theme::ACCENT),
+                );
+                ui.add_space(6.0);
+                let _ = ui.allocate_exact_size(egui::vec2(1.0, 14.0), egui::Sense::hover());
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(ui.cursor().min.x - 6.0, ui.cursor().min.y),
+                        egui::pos2(ui.cursor().min.x - 6.0, ui.cursor().min.y + 14.0),
+                    ],
+                    Stroke::new(1.0, theme::LINE),
+                );
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Open File…").clicked() {
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("DICOM", &["dcm", "dicom"])
+                                .pick_file()
+                            {
+                                app.open_file(&p);
+                            }
+                            ui.close_menu();
+                        }
+                        if ui.button("Open Folder…").clicked() {
+                            if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                                app.open_folder(&p);
+                            }
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        ui.menu_button("Export", |ui| {
+                            if ui.button("Current view → PNG…").clicked() {
+                                export_current_view(app, false);
+                                ui.close_menu();
+                            }
+                            if ui
+                                .button("Current view → PNG (with annotations)…")
+                                .clicked()
+                            {
+                                export_current_view(app, true);
+                                ui.close_menu();
+                            }
+                            if ui.button("Current series → PNG sequence…").clicked() {
+                                export_series_pngs(app, false);
+                                ui.close_menu();
+                            }
+                            if ui
+                                .button("Current series → PNG sequence (with annotations)…")
+                                .clicked()
+                            {
+                                export_series_pngs(app, true);
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui.button("Anonymize active study → folder…").clicked() {
+                                anonymize_active_study(app);
+                                ui.close_menu();
+                            }
+                        });
+                        ui.separator();
+                        if ui.button("Exit").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+
+                    ui.menu_button("View", |ui| {
+                        ui.checkbox(&mut app.ui_state.show_study_browser, "Study browser");
+                        ui.checkbox(&mut app.ui_state.show_metadata_panel, "Metadata panel");
+                        ui.checkbox(&mut app.ui_state.annotations_visible, "Annotations");
+                    });
+
+                    ui.menu_button("Help", |ui| {
+                        if ui.button("About").clicked() {
+                            app.ui_state.show_about = true;
+                            ui.close_menu();
+                        }
+                    });
                 });
-                ui.separator();
-                if ui.button("Exit").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-
-            ui.menu_button("View", |ui| {
-                ui.checkbox(&mut app.ui_state.show_study_browser, "Study Browser");
-                ui.checkbox(&mut app.ui_state.show_metadata_panel, "Metadata Panel");
-                ui.separator();
-                let mut dark = app.config.ui.dark_mode;
-                if ui.checkbox(&mut dark, "Dark Mode").changed() {
-                    app.config.ui.dark_mode = dark;
-                    if dark {
-                        ctx.set_visuals(egui::Visuals::dark());
-                    } else {
-                        ctx.set_visuals(egui::Visuals::light());
-                    }
-                }
-            });
-
-            ui.menu_button("Help", |ui| {
-                if ui.button("About").clicked() {
-                    app.ui_state.show_about = true;
-                    ui.close_menu();
-                }
             });
         });
-    });
 }
 
 fn export_current_view(app: &mut DicomViewerApp, burn: bool) {
@@ -111,14 +128,7 @@ fn export_current_view(app: &mut DicomViewerApp, burn: bool) {
     };
 
     match dcm::export::export_current_view(
-        &inst,
-        &raw,
-        window,
-        invert,
-        &anns,
-        burn,
-        &out,
-        &modality,
+        &inst, &raw, window, invert, &anns, burn, &out, &modality,
     ) {
         Ok(()) => {
             tracing::info!(out = %out.display(), "wrote png");
@@ -201,5 +211,11 @@ fn current_study(app: &DicomViewerApp) -> Option<&crate::dcm::Study> {
 }
 
 fn short_uid(uid: &str) -> String {
-    uid.chars().rev().take(8).collect::<String>().chars().rev().collect()
+    uid.chars()
+        .rev()
+        .take(8)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect()
 }

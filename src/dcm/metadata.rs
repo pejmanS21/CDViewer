@@ -100,13 +100,7 @@ fn format_value(elem: &InMemElement) -> String {
 
     let cleaned: String = raw
         .chars()
-        .map(|c: char| {
-            if c.is_control() && c != '\n' {
-                ' '
-            } else {
-                c
-            }
-        })
+        .map(|c: char| if c.is_control() && c != '\n' { ' ' } else { c })
         .collect();
     let trimmed = cleaned.trim_end_matches('\0').trim().to_string();
     if trimmed.chars().count() > MAX_LEN {

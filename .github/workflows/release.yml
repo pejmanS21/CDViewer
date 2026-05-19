@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0). Leave empty to skip the Release step.'
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ---- Linux ------------------------------------------------------
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            bin: dicom-viewer
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            archive: tar.gz
+            bin: dicom-viewer
+
+          # ---- macOS ------------------------------------------------------
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+            bin: dicom-viewer
+          - target: aarch64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+            bin: dicom-viewer
+
+          # ---- Windows ----------------------------------------------------
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            bin: dicom-viewer.exe
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            bin: dicom-viewer.exe
+            # Cross-compiled from x64 Windows. MSVC ARM64 build tools ship
+            # with the Visual Studio 2022 installation on `windows-latest`.
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-0 \
+            libwayland-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libssl-dev \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-release
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Derive the version label: prefer the pushed tag, else workflow
+          # input, else the crate's package version.
+          if [[ -n "${GITHUB_REF_NAME-}" && "$GITHUB_REF_NAME" == v* ]]; then
+            ver="$GITHUB_REF_NAME"
+          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            ver="${{ github.event.inputs.tag }}"
+          else
+            ver="v$(grep -E '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
+          fi
+          name="dicom-viewer-${ver}-${{ matrix.target }}"
+          stage="dist/release/${name}"
+          mkdir -p "$stage"
+
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$stage/"
+          # Common assets — silently skip missing ones so this stays
+          # forward-compatible with future README/LICENSE additions.
+          for f in dist/README.txt dist/HELP.txt LICENSE LICENSE-MIT LICENSE-APACHE; do
+            [[ -f "$f" ]] && cp "$f" "$stage/" || true
+          done
+          # Windows-only: ship the AutoPlay manifest alongside the exe so
+          # the same archive can be dropped onto a CD-staging area.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp dist/autorun.inf "$stage/" || true
+          fi
+
+          # Archive it.
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            (cd dist/release && 7z a -tzip "../${name}.zip" "${name}" >/dev/null)
+            echo "ARTIFACT=dist/${name}.zip" >> "$GITHUB_ENV"
+          else
+            tar -C dist/release -czf "dist/${name}.tar.gz" "${name}"
+            echo "ARTIFACT=dist/${name}.tar.gz" >> "$GITHUB_ENV"
+          fi
+          echo "ARTIFACT_NAME=${name}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -1,9 +1,48 @@
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 use anyhow::Result;
 use dicom_viewer::app::DicomViewerApp;
 use dicom_viewer::{config, logging};
+use std::path::PathBuf;
 use tracing::info;
+
+/// Folder names probed next to the executable when no CLI argument is
+/// passed. First match wins. These are the conventional CD-burn names.
+const AUTOLOAD_DIRS: &[&str] = &["DICOM", "dicom", "IMAGES", "images", "DICOMDIR"];
+
+/// CLI: `dicom-viewer [PATH]`. If `PATH` is given and exists, that's the
+/// startup folder. Otherwise we look for a sibling `DICOM/` on the same
+/// volume as the binary — the standard layout for autorun CDs.
+fn detect_startup_folder(paths: &config::Paths) -> Option<PathBuf> {
+    let mut args = std::env::args().skip(1);
+    if let Some(arg) = args.next() {
+        let p = PathBuf::from(arg);
+        if p.exists() {
+            info!(path = %p.display(), "startup folder from CLI arg");
+            return Some(p);
+        } else {
+            tracing::warn!(arg = %p.display(), "CLI arg path does not exist");
+        }
+    }
+    if let Ok(env) = std::env::var("DICOM_VIEWER_DATA") {
+        let p = PathBuf::from(env);
+        if p.exists() {
+            info!(path = %p.display(), "startup folder from env");
+            return Some(p);
+        }
+    }
+    for name in AUTOLOAD_DIRS {
+        let p = paths.exe_dir.join(name);
+        if p.is_dir() {
+            info!(path = %p.display(), "startup folder auto-detected next to exe");
+            return Some(p);
+        }
+    }
+    None
+}
 
 fn main() -> Result<()> {
     let paths = config::Paths::resolve()?;
@@ -53,11 +92,19 @@ fn main() -> Result<()> {
 
     let paths_for_app = paths.clone();
     let cfg_for_app = cfg.clone();
+    let startup_folder = detect_startup_folder(&paths);
 
     eframe::run_native(
         "dicom-viewer",
         native_options,
-        Box::new(move |cc| Ok(Box::new(DicomViewerApp::new(cc, paths_for_app, cfg_for_app)))),
+        Box::new(move |cc| {
+            Ok(Box::new(DicomViewerApp::new(
+                cc,
+                paths_for_app,
+                cfg_for_app,
+                startup_folder,
+            )))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {e}"))?;
 

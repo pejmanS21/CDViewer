@@ -93,3 +93,25 @@ Release builds use `panic = "abort"`. `main.rs` installs a panic hook that write
 ## Roadmap status (per the project prompt)
 
 Milestones 1–4 (skeleton, DICOM loading, study tree, viewing tools) and 6–8 (metadata panel, measurement tools, export+anonymise) are implemented. **Milestone 5 (CD/DVD auto-detection) and Milestone 9 (IMAPI2 burning)** are not started; both are gated on Windows testing and will require `#[cfg(target_os = "windows")]` modules under `src/optical/`.
+
+## Pre-commit
+
+`.pre-commit-config.yaml` wires up the local hooks. `cargo fmt` runs on every commit (cheap); `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test` only fire on `git push` (`stages: [pre-push]`) to keep day-to-day commits snappy. Install with:
+
+```
+pip install pre-commit
+pre-commit install                       # commit hook
+pre-commit install --hook-type pre-push  # push hook (clippy + tests)
+```
+
+The top-level `exclude:` block keeps the whitespace fixers and large-file check away from `Cargo.lock`, `sample-data/`, `target/`, and `dist/cd-staging/`.
+
+## CI / release builds
+
+`.github/workflows/ci.yml` runs `cargo clippy -- -D warnings` and `cargo test` on every PR/push across three native targets (Linux x86_64, macOS aarch64, Windows x86_64). The full 6-target build matrix lives in `.github/workflows/release.yml` and triggers on tags `v*`: Linux x86_64/aarch64 (the latter on `ubuntu-24.04-arm`), macOS x86_64/aarch64 (`macos-13` / `macos-14`), Windows x86_64/aarch64 (the ARM build is cross-compiled from `windows-latest` because MSVC ARM64 tooling ships in the runner's VS install). Each target produces a `dicom-viewer-<tag>-<target>.{tar.gz|zip}` bundling the binary with `dist/README.txt`, `dist/HELP.txt`, and (Windows only) `dist/autorun.inf`. The `release` job attaches all six archives to a GitHub Release with auto-generated notes. Linux jobs install the eframe-recommended apt deps (`libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev pkg-config`).
+
+## CD/DVD distribution
+
+The viewer is built to ship on a study disc. Auto-load priority (see `src/main.rs::detect_startup_folder`): `argv[1]` → `$DICOM_VIEWER_DATA` → sibling `DICOM/` (or `dicom/`/`IMAGES/`/`images/`/`DICOMDIR/`) next to the exe. The load runs on the **first `update` tick**, not in `App::new`, so the window paints before a slow optical scan begins; that path lives in `pending_startup` on the app struct alongside `pending_drops`.
+
+Staging scripts live in `dist/` — `make-cd.sh` (POSIX) and `make-cd.ps1` (Windows) — and produce `dist/cd-staging/` ready to burn. The disc layout, ISO commands, cross-compilation notes, and unimplemented polish items (icon, DICOMDIR fast path, code-signing) are documented in [`dist/CD-DISTRIBUTION.md`](dist/CD-DISTRIBUTION.md). The `autorun.inf` invokes `dicom-viewer.exe DICOM` so the AutoPlay prompt's "Run program" action opens the study directly.

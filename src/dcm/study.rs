@@ -24,6 +24,9 @@ pub struct Instance {
     pub view_position: Option<String>,
     /// MG-specific: "L" or "R".
     pub image_laterality: Option<String>,
+    /// ImagePositionPatient z — gold-standard slice ordering for CT/MR.
+    /// `None` when the series doesn't expose it (e.g. MG, US).
+    pub image_position_z: Option<f64>,
 }
 
 #[allow(dead_code)]

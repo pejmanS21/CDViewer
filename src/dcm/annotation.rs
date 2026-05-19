@@ -14,10 +14,23 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Annotation {
-    Length { p1: [f32; 2], p2: [f32; 2] },
-    Angle { p1: [f32; 2], v: [f32; 2], p2: [f32; 2] },
-    Rect { p1: [f32; 2], p2: [f32; 2] },
-    Ellipse { p1: [f32; 2], p2: [f32; 2] },
+    Length {
+        p1: [f32; 2],
+        p2: [f32; 2],
+    },
+    Angle {
+        p1: [f32; 2],
+        v: [f32; 2],
+        p2: [f32; 2],
+    },
+    Rect {
+        p1: [f32; 2],
+        p2: [f32; 2],
+    },
+    Ellipse {
+        p1: [f32; 2],
+        p2: [f32; 2],
+    },
 }
 
 impl Annotation {

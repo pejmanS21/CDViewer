@@ -18,9 +18,7 @@ pub fn init(paths: &Paths) -> Result<WorkerGuard> {
         .with_ansi(false)
         .with_target(true);
 
-    let stderr_layer = fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_target(false);
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr).with_target(false);
 
     tracing_subscriber::registry()
         .with(env_filter)

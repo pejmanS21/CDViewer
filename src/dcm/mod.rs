@@ -8,8 +8,9 @@ pub mod metadata;
 pub mod pixel;
 pub mod roi;
 pub mod study;
+pub mod thumbnail;
 
-pub use pixel::{auto_window, decode_to_rgba, load_raw, render_rgba, RawImage, WindowSetting};
 #[allow(unused_imports)]
 pub use pixel::DecodedFrame;
+pub use pixel::{auto_window, decode_to_rgba, load_raw, render_rgba, RawImage, WindowSetting};
 pub use study::{Instance, Series, Study};

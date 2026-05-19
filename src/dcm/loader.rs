@@ -46,17 +46,14 @@ fn collect_candidate_files(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    let md = std::fs::metadata(dir)
-        .with_context(|| format!("stat {}", dir.display()))?;
+    let md = std::fs::metadata(dir).with_context(|| format!("stat {}", dir.display()))?;
     if md.is_file() {
         if looks_like_dicom(dir) {
             out.push(dir.to_path_buf());
         }
         return Ok(());
     }
-    for entry in std::fs::read_dir(dir)
-        .with_context(|| format!("read_dir {}", dir.display()))?
-    {
+    for entry in std::fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
         let ft = entry.file_type()?;
@@ -109,15 +106,12 @@ fn parse_instance(path: &Path) -> Result<Instance, ReadError> {
             .unwrap_or_default()
     };
     let take_opt_str = |tag| {
-        obj.element(tag).ok().and_then(|e| e.to_str().ok()).map(|s| {
-            s.trim_end_matches('\0').trim().to_string()
-        })
-    };
-    let take_f64 = |tag| {
         obj.element(tag)
             .ok()
-            .and_then(|e| e.to_float64().ok())
+            .and_then(|e| e.to_str().ok())
+            .map(|s| s.trim_end_matches('\0').trim().to_string())
     };
+    let take_f64 = |tag| obj.element(tag).ok().and_then(|e| e.to_float64().ok());
     let take_int = |tag, default: i32| {
         obj.element(tag)
             .ok()
@@ -143,6 +137,12 @@ fn parse_instance(path: &Path) -> Result<Instance, ReadError> {
             }
         });
 
+    let image_position_z = obj
+        .element(tags::IMAGE_POSITION_PATIENT)
+        .ok()
+        .and_then(|e| e.to_multi_float64().ok())
+        .and_then(|v| v.get(2).copied());
+
     Ok(Instance {
         path: path.to_path_buf(),
         sop_instance_uid: take_str(tags::SOP_INSTANCE_UID),
@@ -158,6 +158,7 @@ fn parse_instance(path: &Path) -> Result<Instance, ReadError> {
         pixel_spacing,
         view_position: take_opt_str(tags::VIEW_POSITION),
         image_laterality: take_opt_str(tags::IMAGE_LATERALITY),
+        image_position_z,
     })
 }
 
@@ -194,7 +195,7 @@ fn group_into_studies(instances: Vec<Instance>) -> Vec<Study> {
         let mut series_vec: Vec<Series> = Vec::with_capacity(series_map.len());
         let mut modalities = Vec::<String>::new();
         for (series_uid, mut insts) in series_map {
-            insts.sort_by_key(|i| i.instance_number);
+            sort_slices(&mut insts);
             let smeta = series_meta
                 .remove(&(study_uid.clone(), series_uid.clone()))
                 .unwrap_or_default();
@@ -222,10 +223,32 @@ fn group_into_studies(instances: Vec<Instance>) -> Vec<Study> {
         });
     }
 
+    // Newest studies first — radiologists scan top-down.
+    studies.sort_by(|a, b| b.study_date.cmp(&a.study_date));
+
     if studies.is_empty() {
         warn!("no DICOM files parsed");
     }
     studies
+}
+
+/// Order slices the way a radiologist expects to scroll them. When every
+/// instance carries ImagePositionPatient, sort by z — anatomically correct.
+/// Otherwise fall back to InstanceNumber. Stable ties are broken by
+/// InstanceNumber so duplicate-z slices stay deterministic.
+fn sort_slices(insts: &mut [Instance]) {
+    let all_have_z = !insts.is_empty() && insts.iter().all(|i| i.image_position_z.is_some());
+    if all_have_z {
+        insts.sort_by(|a, b| {
+            let az = a.image_position_z.unwrap_or(0.0);
+            let bz = b.image_position_z.unwrap_or(0.0);
+            az.partial_cmp(&bz)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.instance_number.cmp(&b.instance_number))
+        });
+    } else {
+        insts.sort_by_key(|i| i.instance_number);
+    }
 }
 
 #[derive(Default)]

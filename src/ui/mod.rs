@@ -4,6 +4,7 @@ mod dialogs;
 mod menu_bar;
 mod status_bar;
 mod study_browser;
+pub mod theme;
 mod toolbar;
 mod viewport;
 
@@ -29,14 +30,8 @@ pub enum InProgress {
     LengthP1([f32; 2]),
     AngleP1([f32; 2]),
     AngleP1V([f32; 2], [f32; 2]),
-    RectDrag {
-        start: [f32; 2],
-        cur: [f32; 2],
-    },
-    EllipseDrag {
-        start: [f32; 2],
-        cur: [f32; 2],
-    },
+    RectDrag { start: [f32; 2], cur: [f32; 2] },
+    EllipseDrag { start: [f32; 2], cur: [f32; 2] },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

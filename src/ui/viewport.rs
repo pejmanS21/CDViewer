@@ -8,6 +8,7 @@ use crate::dcm::annotation::Annotation;
 use crate::dcm::roi::{angle_deg, ellipse_stats, length_label, rect_stats};
 use crate::dcm::study::Instance;
 use crate::dcm::{self, RawImage};
+use crate::ui::theme;
 use crate::ui::{study_browser::SeriesDragPayload, ActiveTool, InProgress};
 use egui::epaint::{Mesh, Vertex};
 use egui::{
@@ -16,33 +17,39 @@ use egui::{
 };
 use std::sync::Arc;
 
-const LEN_COLOR: Color32 = Color32::from_rgb(255, 235, 100);
-const ANG_COLOR: Color32 = Color32::from_rgb(255, 180, 100);
-const RECT_COLOR: Color32 = Color32::from_rgb(120, 220, 255);
-const ELL_COLOR: Color32 = Color32::from_rgb(140, 240, 170);
-const PROG_COLOR: Color32 = Color32::from_rgb(255, 120, 120);
+const LEN_COLOR: Color32 = theme::ACCENT;
+const ANG_COLOR: Color32 = Color32::from_rgb(0xE8, 0xC8, 0x6D);
+const RECT_COLOR: Color32 = theme::CYAN_DATA;
+const ELL_COLOR: Color32 = Color32::from_rgb(0x9C, 0xE0, 0xB4);
+const PROG_COLOR: Color32 = Color32::from_rgb(0xE0, 0x6C, 0x6C);
 
 pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
-    CentralPanel::default().show(ctx, |ui| {
-        let avail = ui.available_rect_before_wrap();
-        let (cols, rows) = app.grid.dims();
-        let gap = 4.0;
-        let cw = (avail.width() - gap * (cols as f32 - 1.0)) / cols as f32;
-        let ch = (avail.height() - gap * (rows as f32 - 1.0)) / rows as f32;
+    CentralPanel::default()
+        .frame(
+            egui::Frame::default()
+                .fill(theme::BG)
+                .inner_margin(egui::Margin::same(2.0)),
+        )
+        .show(ctx, |ui| {
+            let avail = ui.available_rect_before_wrap();
+            let (cols, rows) = app.grid.dims();
+            let gap = 2.0;
+            let cw = (avail.width() - gap * (cols as f32 - 1.0)) / cols as f32;
+            let ch = (avail.height() - gap * (rows as f32 - 1.0)) / rows as f32;
 
-        let n = app.grid.cell_count();
-        for cell_idx in 0..n {
-            let col = cell_idx % cols;
-            let row = cell_idx / cols;
-            let origin = Pos2::new(
-                avail.min.x + col as f32 * (cw + gap),
-                avail.min.y + row as f32 * (ch + gap),
-            );
-            let cell_rect = Rect::from_min_size(origin, Vec2::new(cw, ch));
-            draw_cell(ui, ctx, app, cell_idx, cell_rect);
-        }
-        ui.allocate_rect(avail, Sense::hover());
-    });
+            let n = app.grid.cell_count();
+            for cell_idx in 0..n {
+                let col = cell_idx % cols;
+                let row = cell_idx / cols;
+                let origin = Pos2::new(
+                    avail.min.x + col as f32 * (cw + gap),
+                    avail.min.y + row as f32 * (ch + gap),
+                );
+                let cell_rect = Rect::from_min_size(origin, Vec2::new(cw, ch));
+                draw_cell(ui, ctx, app, cell_idx, cell_rect);
+            }
+            ui.allocate_rect(avail, Sense::hover());
+        });
 }
 
 fn draw_cell(ui: &mut Ui, ctx: &Context, app: &mut DicomViewerApp, cell_idx: usize, rect: Rect) {
@@ -55,10 +62,21 @@ fn draw_cell(ui: &mut Ui, ctx: &Context, app: &mut DicomViewerApp, cell_idx: usi
 
     if let Some(payload) = DragAndDrop::payload::<SeriesDragPayload>(ctx) {
         if hovered {
-            ui.painter().rect_stroke(
-                rect.shrink(2.0),
+            // A glowing inner stroke + 4 amber brackets — instrumentation feel
+            // rather than a generic yellow rectangle.
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(
+                rect.shrink(1.0),
                 0.0,
-                Stroke::new(2.0, Color32::from_rgb(255, 220, 80)),
+                Color32::from_rgba_unmultiplied(0xE8, 0xA2, 0x2D, 22),
+            );
+            paint_brackets_four(&painter, rect.shrink(3.0), theme::ACCENT, 18.0, 1.5);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "  DROP TO LOAD  ",
+                FontId::monospace(11.0),
+                theme::ACCENT,
             );
         }
         if hovered && pointer_released {
@@ -135,17 +153,14 @@ fn paint_cell_contents(
         user_invert,
     );
 
-    let dst = compute_dst_rect(raw.width as f32, raw.height as f32, &app.cells[cell_idx], rect);
-    handle_input(
-        ui,
-        app,
-        cell_idx,
-        count,
-        &raw,
+    let dst = compute_dst_rect(
+        raw.width as f32,
+        raw.height as f32,
+        &app.cells[cell_idx],
         rect,
-        dst,
-        &instance,
-        is_active,
+    );
+    handle_input(
+        ui, app, cell_idx, count, &raw, rect, dst, &instance, is_active,
     );
 
     let cell = &app.cells[cell_idx];
@@ -156,18 +171,12 @@ fn paint_cell_contents(
     paint_image(ui.painter_at(rect), &tex, rect, dst, cell);
 
     if app.ui_state.annotations_visible {
-        let anns = app.annotation_store.for_instance(&instance.sop_instance_uid);
+        let anns = app
+            .annotation_store
+            .for_instance(&instance.sop_instance_uid);
         let painter = ui.painter_at(rect);
         for ann in anns {
-            draw_annotation(
-                &painter,
-                ann,
-                &raw,
-                &instance,
-                &series.modality,
-                cell,
-                dst,
-            );
+            draw_annotation(&painter, ann, &raw, &instance, &series.modality, cell, dst);
         }
     }
 
@@ -177,53 +186,194 @@ fn paint_cell_contents(
         }
     }
 
-    let overlay = format!(
-        "{} {}/{}\nC={:.0} W={:.0}{}{}",
-        series.modality,
-        slice + 1,
+    paint_corner_overlays(
+        &ui.painter_at(rect),
+        rect,
+        cell_idx,
+        app.cells.len(),
+        &series.modality,
+        &instance,
+        slice,
         count,
-        window.0,
-        window.1,
-        if user_invert { "  INV" } else { "" },
-        match cell.rotation_quarter {
-            0 => "",
-            1 => "  ⟳90",
-            2 => "  ⟳180",
-            3 => "  ⟳270",
-            _ => "",
-        },
-    );
-    ui.painter().text(
-        rect.left_top() + Vec2::new(8.0, 6.0),
-        Align2::LEFT_TOP,
-        overlay,
-        FontId::monospace(12.0),
-        Color32::from_rgb(220, 220, 80),
+        window,
+        cell,
+        user_invert,
     );
 
-    let stroke = if is_active {
-        Stroke::new(1.5, Color32::from_rgb(120, 180, 255))
+    // Active-cell indicator: amber viewfinder brackets, not a solid rect.
+    if is_active {
+        theme::paint_active_brackets(&ui.painter_at(rect), rect, theme::ACCENT, 14.0);
     } else {
-        Stroke::new(1.0, Color32::from_gray(40))
-    };
-    ui.painter().rect_stroke(rect.shrink(1.0), 0.0, stroke);
+        ui.painter()
+            .rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0, theme::LINE));
+    }
 }
 
 fn draw_empty_cell(ui: &Ui, rect: Rect, is_active: bool) {
     let painter = ui.painter_at(rect);
-    let stroke = if is_active {
-        Stroke::new(1.5, Color32::from_rgb(120, 180, 255))
-    } else {
-        Stroke::new(1.0, Color32::from_gray(40))
-    };
-    painter.rect_stroke(rect.shrink(1.0), 0.0, stroke);
+    painter.rect_filled(rect, 0.0, theme::BG_DEEP);
+
+    // Faint corner brackets even on empty cells — establishes that every
+    // cell is a slot, not just an empty rectangle.
+    paint_brackets_four(&painter, rect.shrink(6.0), theme::LINE_BRIGHT, 10.0, 1.0);
+
+    // A subtle centred reticle.
+    let c = rect.center();
+    let s = Stroke::new(1.0, theme::LINE_BRIGHT);
+    let arm = 8.0;
+    let gap = 3.0;
+    painter.line_segment([c - Vec2::new(arm, 0.0), c - Vec2::new(gap, 0.0)], s);
+    painter.line_segment([c + Vec2::new(gap, 0.0), c + Vec2::new(arm, 0.0)], s);
+    painter.line_segment([c - Vec2::new(0.0, arm), c - Vec2::new(0.0, gap)], s);
+    painter.line_segment([c + Vec2::new(0.0, gap), c + Vec2::new(0.0, arm)], s);
+    painter.circle_stroke(c, 1.5, s);
+
     painter.text(
-        rect.center(),
+        c + Vec2::new(0.0, 22.0),
         Align2::CENTER_CENTER,
-        "drag a series here",
-        FontId::proportional(13.0),
-        Color32::from_gray(120),
+        "—  drag a series  —",
+        FontId::proportional(11.0),
+        theme::FG_FAINT,
     );
+
+    if is_active {
+        theme::paint_active_brackets(&painter, rect, theme::ACCENT, 14.0);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_corner_overlays(
+    painter: &Painter,
+    rect: Rect,
+    cell_idx: usize,
+    cell_total: usize,
+    modality: &str,
+    instance: &Instance,
+    slice: usize,
+    count: usize,
+    window: (f64, f64),
+    cell: &CellState,
+    user_invert: bool,
+) {
+    let pad = Vec2::new(8.0, 6.0);
+    let mono = FontId::monospace(11.0);
+    let mono_big = FontId::monospace(14.0);
+    let prop = FontId::proportional(10.5);
+
+    // Top-left: modality chip + view label
+    let chip = format!(" {} ", modality);
+    let chip_color = theme::modality_color(modality);
+    let chip_galley = painter.layout_no_wrap(chip.clone(), mono.clone(), theme::BG);
+    let chip_rect =
+        Rect::from_min_size(rect.left_top() + pad, chip_galley.size()).expand2(Vec2::new(2.0, 1.0));
+    painter.rect_filled(chip_rect, 0.0, chip_color);
+    painter.galley(
+        chip_rect.left_top() + Vec2::new(2.0, 1.0),
+        chip_galley,
+        theme::BG,
+    );
+
+    // View hint (MG laterality/view position, or "AX/SAG/COR" placeholder)
+    if let Some(lat) = instance.image_laterality.as_deref() {
+        let view = instance.view_position.as_deref().unwrap_or("");
+        let tag = format!("{lat} · {view}")
+            .trim_end_matches(" · ")
+            .to_string();
+        painter.text(
+            chip_rect.right_top() + Vec2::new(6.0, 0.0),
+            Align2::LEFT_TOP,
+            tag,
+            mono.clone(),
+            theme::FG,
+        );
+    }
+
+    // Top-right: cell number / total
+    let cell_label = format!("CELL {:02}/{:02}", cell_idx + 1, cell_total);
+    painter.text(
+        rect.right_top() + Vec2::new(-pad.x, pad.y),
+        Align2::RIGHT_TOP,
+        cell_label,
+        mono.clone(),
+        theme::FG_DIM,
+    );
+
+    // Bottom-left: slice indicator (big number, tabular)
+    let slice_big = format!("{:03}", slice + 1);
+    let slice_dim = format!(" / {:03}", count);
+    let g_big = painter.layout_no_wrap(slice_big.clone(), mono_big.clone(), theme::ACCENT);
+    let bl = rect.left_bottom() + Vec2::new(pad.x, -pad.y - g_big.size().y);
+    painter.galley(bl, g_big.clone(), theme::ACCENT);
+    painter.text(
+        bl + Vec2::new(g_big.size().x, g_big.size().y * 0.55),
+        Align2::LEFT_BOTTOM,
+        &slice_dim,
+        mono.clone(),
+        theme::FG_DIM,
+    );
+    painter.text(
+        bl + Vec2::new(0.0, -1.0),
+        Align2::LEFT_BOTTOM,
+        "SLICE",
+        prop.clone(),
+        theme::FG_FAINT,
+    );
+
+    // Bottom-right: window/level + zoom + transform flags, stacked
+    let mut flags = String::new();
+    if user_invert {
+        flags.push_str(" INV");
+    }
+    if cell.flip_h {
+        flags.push_str(" ⇄H");
+    }
+    if cell.flip_v {
+        flags.push_str(" ⇅V");
+    }
+    match cell.rotation_quarter % 4 {
+        1 => flags.push_str(" ⟳90"),
+        2 => flags.push_str(" ⟳180"),
+        3 => flags.push_str(" ⟳270"),
+        _ => {}
+    }
+    let line_wl = format!("C {:>5.0}   W {:>5.0}", window.0, window.1);
+    let line_z = format!("ZOOM {:>5.0}%", cell.zoom * 100.0);
+
+    let br = rect.right_bottom() + Vec2::new(-pad.x, -pad.y);
+    let g_wl = painter.layout_no_wrap(line_wl, mono.clone(), theme::CYAN_DATA);
+    let g_z = painter.layout_no_wrap(line_z, mono.clone(), theme::FG_DIM);
+    let g_f = painter.layout_no_wrap(flags.trim().to_string(), mono.clone(), theme::ACCENT);
+
+    let mut y = br.y;
+    if !g_f.is_empty() {
+        y -= g_f.size().y;
+        painter.galley(Pos2::new(br.x - g_f.size().x, y), g_f, theme::ACCENT);
+    }
+    y -= g_z.size().y + 1.0;
+    painter.galley(Pos2::new(br.x - g_z.size().x, y), g_z, theme::FG_DIM);
+    y -= g_wl.size().y + 1.0;
+    painter.galley(Pos2::new(br.x - g_wl.size().x, y), g_wl, theme::CYAN_DATA);
+
+    // Patient name (subtle, top-centre) — small reminder of context
+    if !instance.modality.is_empty() {
+        // Already shown via chip; keep patient name only if non-empty in instance.
+    }
+}
+
+fn paint_brackets_four(painter: &Painter, rect: Rect, color: Color32, arm: f32, width: f32) {
+    let s = Stroke::new(width, color);
+    let tl = rect.left_top();
+    let tr = rect.right_top();
+    let bl = rect.left_bottom();
+    let br = rect.right_bottom();
+    painter.line_segment([tl, Pos2::new(tl.x + arm, tl.y)], s);
+    painter.line_segment([tl, Pos2::new(tl.x, tl.y + arm)], s);
+    painter.line_segment([tr, Pos2::new(tr.x - arm, tr.y)], s);
+    painter.line_segment([tr, Pos2::new(tr.x, tr.y + arm)], s);
+    painter.line_segment([bl, Pos2::new(bl.x + arm, bl.y)], s);
+    painter.line_segment([bl, Pos2::new(bl.x, bl.y - arm)], s);
+    painter.line_segment([br, Pos2::new(br.x - arm, br.y)], s);
+    painter.line_segment([br, Pos2::new(br.x, br.y - arm)], s);
 }
 
 fn ensure_texture(
@@ -313,13 +463,7 @@ fn image_to_screen(img_xy: [f32; 2], raw_w: f32, raw_h: f32, cell: &CellState, d
     dst.min + Vec2::new(uu * dst.width(), vv * dst.height())
 }
 
-fn screen_to_image(
-    screen: Pos2,
-    raw_w: f32,
-    raw_h: f32,
-    cell: &CellState,
-    dst: Rect,
-) -> [f32; 2] {
+fn screen_to_image(screen: Pos2, raw_w: f32, raw_h: f32, cell: &CellState, dst: Rect) -> [f32; 2] {
     let uu = (screen.x - dst.min.x) / dst.width().max(1e-3);
     let vv = (screen.y - dst.min.y) / dst.height().max(1e-3);
     let (u, v) = match cell.rotation_quarter % 4 {
@@ -388,7 +532,15 @@ fn handle_input(
 
     if tool.is_measurement() {
         handle_measurement(
-            app, cell_idx, &resp, raw_w, raw_h, dst, &uid, tool, middle_down,
+            app,
+            cell_idx,
+            &resp,
+            raw_w,
+            raw_h,
+            dst,
+            &uid,
+            tool,
+            middle_down,
         );
     } else if resp.dragged() {
         let drag = resp.drag_delta();
@@ -481,14 +633,7 @@ fn handle_measurement(
                             app.ui_state.in_progress = Some(InProgress::AngleP1V(p1, img_pt));
                         }
                         Some(InProgress::AngleP1V(p1, v)) => {
-                            app.push_annotation(
-                                uid,
-                                Annotation::Angle {
-                                    p1,
-                                    v,
-                                    p2: img_pt,
-                                },
-                            );
+                            app.push_annotation(uid, Annotation::Angle { p1, v, p2: img_pt });
                             app.ui_state.in_progress = None;
                         }
                         _ => {
@@ -527,23 +672,14 @@ fn handle_measurement(
                     match prog {
                         InProgress::RectDrag { start, cur } => {
                             if (cur[0] - start[0]).abs() > 2.0 || (cur[1] - start[1]).abs() > 2.0 {
-                                app.push_annotation(
-                                    uid,
-                                    Annotation::Rect {
-                                        p1: start,
-                                        p2: cur,
-                                    },
-                                );
+                                app.push_annotation(uid, Annotation::Rect { p1: start, p2: cur });
                             }
                         }
                         InProgress::EllipseDrag { start, cur } => {
                             if (cur[0] - start[0]).abs() > 2.0 || (cur[1] - start[1]).abs() > 2.0 {
                                 app.push_annotation(
                                     uid,
-                                    Annotation::Ellipse {
-                                        p1: start,
-                                        p2: cur,
-                                    },
+                                    Annotation::Ellipse { p1: start, p2: cur },
                                 );
                             }
                         }
@@ -556,13 +692,7 @@ fn handle_measurement(
     }
 }
 
-fn paint_image(
-    painter: Painter,
-    tex: &TextureHandle,
-    rect: Rect,
-    dst: Rect,
-    cell: &CellState,
-) {
+fn paint_image(painter: Painter, tex: &TextureHandle, rect: Rect, dst: Rect, cell: &CellState) {
     let mut uvs = [
         Pos2::new(0.0, 0.0),
         Pos2::new(1.0, 0.0),
@@ -615,8 +745,7 @@ fn draw_annotation(
 ) {
     let raw_w = raw.width as f32;
     let raw_h = raw.height as f32;
-    let to_screen =
-        |p: [f32; 2]| -> Pos2 { image_to_screen(p, raw_w, raw_h, cell, dst) };
+    let to_screen = |p: [f32; 2]| -> Pos2 { image_to_screen(p, raw_w, raw_h, cell, dst) };
     match ann {
         Annotation::Length { p1, p2 } => {
             let a = to_screen(*p1);
@@ -640,7 +769,12 @@ fn draw_annotation(
             painter.circle_filled(s_v, 3.0, ANG_COLOR);
             painter.circle_filled(s_p2, 3.0, ANG_COLOR);
             let deg = angle_deg(*p1, *v, *p2);
-            label_text(painter, s_v + Vec2::new(8.0, -14.0), &format!("{deg:.1}°"), ANG_COLOR);
+            label_text(
+                painter,
+                s_v + Vec2::new(8.0, -14.0),
+                &format!("{deg:.1}°"),
+                ANG_COLOR,
+            );
         }
         Annotation::Rect { p1, p2 } => {
             let a = to_screen(*p1);
@@ -648,7 +782,12 @@ fn draw_annotation(
             let r = Rect::from_two_pos(a, b);
             painter.rect_stroke(r, 0.0, Stroke::new(1.5, RECT_COLOR));
             if let Some(stats) = rect_stats(raw, *p1, *p2) {
-                label_text(painter, r.left_top() - Vec2::new(0.0, 14.0), &stats.label(modality), RECT_COLOR);
+                label_text(
+                    painter,
+                    r.left_top() - Vec2::new(0.0, 14.0),
+                    &stats.label(modality),
+                    RECT_COLOR,
+                );
             }
         }
         Annotation::Ellipse { p1, p2 } => {
@@ -657,7 +796,12 @@ fn draw_annotation(
             let r = Rect::from_two_pos(a, b);
             draw_ellipse(painter, r, ELL_COLOR, 1.5);
             if let Some(stats) = ellipse_stats(raw, *p1, *p2) {
-                label_text(painter, r.left_top() - Vec2::new(0.0, 14.0), &stats.label(modality), ELL_COLOR);
+                label_text(
+                    painter,
+                    r.left_top() - Vec2::new(0.0, 14.0),
+                    &stats.label(modality),
+                    ELL_COLOR,
+                );
             }
         }
     }

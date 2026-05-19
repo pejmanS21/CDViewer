@@ -1,0 +1,40 @@
+DICOM VIEWER  —  QUICK REFERENCE
+================================
+
+MOUSE
+  Drag (W/L tool)       Adjust window/level
+  Drag (Pan tool)       Pan image
+  Drag (Zoom tool)      Drag down = zoom in, up = zoom out
+  Middle-mouse drag     Pan (works in any tool)
+  Ctrl/⌘ + scroll       Zoom
+  Scroll wheel          Next / previous slice
+  Click cell            Select cell
+  Drag series → cell    Load that series into that cell
+  Right-click metadata  Copy value / tag / name
+
+KEYBOARD
+  Page Up / Page Down   Previous / next slice
+  ←  →                  Previous / next slice
+  Home / End            First / last slice
+
+TOOLS
+  W/L   Window-level adjustment (default)
+  PAN   Translate the image
+  ZOOM  Scale the image
+  LEN   Length measurement (2 clicks, mm if pixel spacing present)
+  ANG   Angle (3 clicks: side · vertex · side)
+  ROI ▭ Rectangle ROI with mean / std / min / max
+  ROI ◯ Ellipse ROI
+
+VIEW
+  Cycle layouts in the toolbar (1×1 … 4×4).
+  Toggle the study browser and metadata panel in the View menu.
+  Use Reset View on the active cell to undo pan/zoom/rotate/window.
+
+WINDOW PRESETS
+  Soft tissue   C= 40   W= 400
+  Lung          C=-600  W=1500
+  Bone          C=300   W=1500
+  Brain         C= 40   W=  80
+  Abdomen       C= 60   W= 400
+  Mediastinum   C= 50   W= 350

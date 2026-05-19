@@ -29,7 +29,10 @@ fn ct_folder_loads_as_single_series() {
         .flat_map(|s| s.series.iter())
         .map(|s| s.instances.len())
         .sum();
-    assert!(total_instances >= 20, "expected many CT slices, got {total_instances}");
+    assert!(
+        total_instances >= 20,
+        "expected many CT slices, got {total_instances}"
+    );
 
     let has_ct = studies
         .iter()
@@ -46,11 +49,9 @@ fn ct_first_slice_decodes() {
     };
     let studies = dicom_viewer::dcm::loader::load_folder(&root).expect("load");
     let inst = &studies[0].series[0].instances[0];
-    let frame = dicom_viewer::dcm::decode_to_rgba(
-        &inst.path,
-        dicom_viewer::dcm::WindowSetting::Auto,
-    )
-    .expect("decode CT");
+    let frame =
+        dicom_viewer::dcm::decode_to_rgba(&inst.path, dicom_viewer::dcm::WindowSetting::Auto)
+            .expect("decode CT");
     assert_eq!(frame.rgba.len() as u32, frame.width * frame.height * 4);
 }
 
@@ -67,11 +68,9 @@ fn mg_first_image_decodes() {
         .find(|s| s.is_mammography())
         .expect("mg series")
         .instances[0];
-    let frame = dicom_viewer::dcm::decode_to_rgba(
-        &inst.path,
-        dicom_viewer::dcm::WindowSetting::Auto,
-    )
-    .expect("decode MG");
+    let frame =
+        dicom_viewer::dcm::decode_to_rgba(&inst.path, dicom_viewer::dcm::WindowSetting::Auto)
+            .expect("decode MG");
     assert_eq!(frame.rgba.len() as u32, frame.width * frame.height * 4);
 }
 
@@ -106,8 +105,7 @@ fn length_label_uses_pixel_spacing() {
     let studies = dicom_viewer::dcm::loader::load_folder(&root).expect("load");
     let inst = &studies[0].series[0].instances[0];
     let raw = dicom_viewer::dcm::load_raw(&inst.path).expect("raw");
-    let label =
-        dicom_viewer::dcm::roi::length_label([0.0, 0.0], [100.0, 0.0], inst, &raw);
+    let label = dicom_viewer::dcm::roi::length_label([0.0, 0.0], [100.0, 0.0], inst, &raw);
     if inst.pixel_spacing.is_some() {
         assert!(label.contains("mm"), "expected mm units, got {label}");
     } else {
@@ -128,7 +126,14 @@ fn png_export_writes_file() {
     let tmp = std::env::temp_dir().join("dv-test-export.png");
     let _ = std::fs::remove_file(&tmp);
     dicom_viewer::dcm::export::export_current_view(
-        inst, &raw, window, false, &[], false, &tmp, "CT",
+        inst,
+        &raw,
+        window,
+        false,
+        &[],
+        false,
+        &tmp,
+        "CT",
     )
     .expect("export");
     let meta = std::fs::metadata(&tmp).expect("png written");
@@ -152,7 +157,12 @@ fn anonymize_blanks_patient_name() {
     let _ = std::fs::remove_file(&tmp);
     dicom_viewer::dcm::export::anonymize_file(&inst.path, &tmp).expect("anon");
     let obj = open_file(&tmp).expect("read back");
-    let name = obj.element(tags::PATIENT_NAME).expect("pn").to_str().expect("str").into_owned();
+    let name = obj
+        .element(tags::PATIENT_NAME)
+        .expect("pn")
+        .to_str()
+        .expect("str")
+        .into_owned();
     assert!(name.contains("Anon") || name.is_empty(), "got '{name}'");
     let _ = std::fs::remove_file(&tmp);
     let _ = Header::tag(obj.element(tags::PATIENT_NAME).unwrap());

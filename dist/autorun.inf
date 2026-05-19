@@ -1,0 +1,20 @@
+; Windows AutoPlay manifest for the DICOM Viewer CD/DVD.
+;
+; Windows 7+ disables silent autorun from removable media for security
+; reasons — the user will see an AutoPlay prompt offering to open the
+; viewer. That's the desired UX: nothing executes without consent.
+;
+; The "open=" line still drives the prompt's "Run program" action and the
+; double-click action on the drive icon, so most users will reach the
+; viewer with a single click.
+
+[autorun]
+open=dicom-viewer.exe DICOM
+icon=dicom-viewer.exe,0
+label=DICOM Viewer
+action=Open DICOM study with DICOM Viewer
+
+[Content]
+PictureFiles=no
+MusicFiles=no
+VideoFiles=no

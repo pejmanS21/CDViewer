@@ -1,0 +1,87 @@
+# pre-commit configuration for the DICOM viewer.
+#
+# Quick install:
+#     pip install pre-commit                  # or: brew install pre-commit
+#     pre-commit install                      # hooks fire on `git commit`
+#     pre-commit install --hook-type pre-push # adds the slower clippy gate
+#
+# Run on demand against the whole tree:
+#     pre-commit run --all-files
+#
+# We split the hooks across two git stages so day-to-day commits stay
+# snappy and clippy only runs when something actually leaves the laptop.
+
+# Skip generated lockfile + binary fixture data + build output. None of
+# these should be touched by whitespace fixers, and trying to lint a 19 MB
+# DICOM file is just noise.
+exclude: |
+  (?x)^(
+      Cargo\.lock |
+      sample-data/.* |
+      target/.* |
+      dist/cd-staging/.*
+  )$
+
+default_language_version:
+  python: python3
+
+repos:
+  # General-purpose file hygiene.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(md|txt)$'  # markdown sometimes uses two-space line breaks
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        # GitHub workflow files use `on:` which clashes with YAML's
+        # truthy-key heuristic — silence the warning, don't fail.
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: check-executables-have-shebangs
+        # Rust uses `#![...]` inner attributes which look like shebangs.
+        exclude: '\.rs$'
+      - id: check-shebang-scripts-are-executable
+        exclude: '\.rs$'
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  # Rust formatting — cheap, runs on every commit.
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Format Rust code with rustfmt.
+        entry: cargo fmt --all --
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+  # Heavier Rust checks — only on push. Comment these out if you want
+  # them to fire on every commit too, but expect commits to slow down on
+  # cold incremental caches.
+  - repo: local
+    hooks:
+      - id: cargo-clippy
+        name: cargo clippy (-D warnings)
+        description: Lint with the same gate the CI uses.
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: cargo-test
+        name: cargo test
+        description: Run the full test suite (incl. sample-data fixtures).
+        entry: cargo test --all-features --quiet
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]

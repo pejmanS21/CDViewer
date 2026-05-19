@@ -3,7 +3,7 @@
 
 use crate::dcm::annotation::{Annotation, AnnotationStore};
 use crate::dcm::pixel::{auto_window, load_raw, render_rgba, RawImage};
-use crate::dcm::roi::{angle_deg, length_label, rect_stats, ellipse_stats};
+use crate::dcm::roi::{angle_deg, ellipse_stats, length_label, rect_stats};
 use crate::dcm::study::{Instance, Series};
 use anyhow::{Context, Result};
 use dicom::core::value::{DataSetSequence, PrimitiveValue, Value};
@@ -90,14 +90,8 @@ impl Canvas {
     }
 
     fn write_png(&self, path: &Path) -> Result<()> {
-        image::save_buffer(
-            path,
-            &self.data,
-            self.w,
-            self.h,
-            image::ColorType::Rgba8,
-        )
-        .with_context(|| format!("write png {}", path.display()))?;
+        image::save_buffer(path, &self.data, self.w, self.h, image::ColorType::Rgba8)
+            .with_context(|| format!("write png {}", path.display()))?;
         Ok(())
     }
 }
@@ -126,8 +120,7 @@ pub fn export_series_pngs(
     store: &AnnotationStore,
     burn_annotations: bool,
 ) -> Result<usize> {
-    fs::create_dir_all(out_dir)
-        .with_context(|| format!("create {}", out_dir.display()))?;
+    fs::create_dir_all(out_dir).with_context(|| format!("create {}", out_dir.display()))?;
     let mut written = 0usize;
     for (i, inst) in series.instances.iter().enumerate() {
         let raw = match load_raw(&inst.path) {
@@ -178,13 +171,7 @@ fn burn_into_canvas(
                 let _ = angle_deg(*p1, *v, *p2);
             }
             Annotation::Rect { p1, p2 } => {
-                canvas.rect_outline(
-                    p1[0] as i32,
-                    p1[1] as i32,
-                    p2[0] as i32,
-                    p2[1] as i32,
-                    cyan,
-                );
+                canvas.rect_outline(p1[0] as i32, p1[1] as i32, p2[0] as i32, p2[1] as i32, cyan);
                 let _ = rect_stats(raw, *p1, *p2);
                 let _ = modality;
             }
@@ -267,10 +254,7 @@ pub fn anonymize_file(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn anonymize_study(
-    study: &crate::dcm::Study,
-    out_dir: &Path,
-) -> Result<(usize, usize)> {
+pub fn anonymize_study(study: &crate::dcm::Study, out_dir: &Path) -> Result<(usize, usize)> {
     let mut ok = 0usize;
     let mut fail = 0usize;
     fs::create_dir_all(out_dir).ok();
@@ -301,6 +285,8 @@ fn safe_name(s: &str) -> String {
 }
 
 #[allow(dead_code)]
-fn _force_use(d: DataSetSequence<dicom::object::InMemDicomObject>) -> DataSetSequence<dicom::object::InMemDicomObject> {
+fn _force_use(
+    d: DataSetSequence<dicom::object::InMemDicomObject>,
+) -> DataSetSequence<dicom::object::InMemDicomObject> {
     d
 }
