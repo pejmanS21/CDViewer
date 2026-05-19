@@ -55,12 +55,11 @@ pub enum FitMode {
     /// smaller axis fills exactly; the other has a dark margin.
     #[default]
     Contain,
-    /// Fill the cell entirely. The image is scaled so the larger of
-    /// `cell_w/img_w` and `cell_h/img_h` wins, and whichever axis
-    /// overflows is clipped by the cell rect. Used for MG so the breast
-    /// tissue reaches the chest-wall edge of the cell regardless of the
-    /// window's aspect ratio.
-    Cover,
+    /// Mammography hanging protocol: scale so the image height equals
+    /// the cell height. Width may underflow on landscape windows (dark
+    /// margin on the outer side of the cell), which is the standard
+    /// MG-workstation look and keeps the breast un-cropped.
+    Height,
 }
 
 /// Horizontal anchor inside the cell rect when the image doesn't fill the
@@ -156,7 +155,7 @@ impl CellState {
     /// chest-wall anchored to the inner edge of the 2×2, left breasts
     /// mirrored so chest walls face each other.
     pub fn apply_mg_hanging(&mut self, side: MgSide) {
-        self.fit_mode = FitMode::Cover;
+        self.fit_mode = FitMode::Height;
         match side {
             MgSide::Right => {
                 self.flip_h = false;
