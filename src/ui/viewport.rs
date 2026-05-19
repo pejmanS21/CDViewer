@@ -439,7 +439,7 @@ fn compute_dst_rect(img_w: f32, img_h: f32, cell: &CellState, rect: Rect) -> Rec
     };
     let scale = match cell.fit_mode {
         FitMode::Contain => (rect.width() / eff_w.max(1.0)).min(rect.height() / eff_h.max(1.0)),
-        FitMode::Height => rect.height() / eff_h.max(1.0),
+        FitMode::Cover => (rect.width() / eff_w.max(1.0)).max(rect.height() / eff_h.max(1.0)),
     };
     let z = scale * cell.zoom;
     let dst_size = Vec2::new(eff_w * z, eff_h * z);

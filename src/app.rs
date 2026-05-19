@@ -51,12 +51,16 @@ pub struct DicomViewerApp {
 /// How the image is sized relative to its cell rect.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FitMode {
-    /// Default: fit the image inside the cell, preserving aspect.
+    /// Default: fit the image inside the cell, preserving aspect. The
+    /// smaller axis fills exactly; the other has a dark margin.
     #[default]
     Contain,
-    /// Mammography hanging protocol: fill the cell vertically, let the
-    /// other axis overflow / underflow as needed.
-    Height,
+    /// Fill the cell entirely. The image is scaled so the larger of
+    /// `cell_w/img_w` and `cell_h/img_h` wins, and whichever axis
+    /// overflows is clipped by the cell rect. Used for MG so the breast
+    /// tissue reaches the chest-wall edge of the cell regardless of the
+    /// window's aspect ratio.
+    Cover,
 }
 
 /// Horizontal anchor inside the cell rect when the image doesn't fill the
@@ -152,7 +156,7 @@ impl CellState {
     /// chest-wall anchored to the inner edge of the 2×2, left breasts
     /// mirrored so chest walls face each other.
     pub fn apply_mg_hanging(&mut self, side: MgSide) {
-        self.fit_mode = FitMode::Height;
+        self.fit_mode = FitMode::Cover;
         match side {
             MgSide::Right => {
                 self.flip_h = false;
