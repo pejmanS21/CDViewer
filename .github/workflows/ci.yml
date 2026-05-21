@@ -27,9 +27,6 @@ jobs:
             test: true
 
           # ---- macOS ------------------------------------------------------
-          - target: x86_64-apple-darwin
-            os: macos-13
-            test: true
           - target: aarch64-apple-darwin
             os: macos-14
             test: true

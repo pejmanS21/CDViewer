@@ -3,12 +3,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v0.1.0). Leave empty to skip the Release step.'
-        required: false
-        default: ''
 
 env:
   CARGO_TERM_COLOR: always
@@ -86,25 +80,13 @@ jobs:
 
       - name: Stage payload
         shell: bash
-        # Route every templated value through env. `github.event.inputs.tag`
-        # is user-supplied via workflow_dispatch and would otherwise be
-        # spliced into the bash literal at expansion time — shell-injection
-        # vector. Matrix values are author-controlled but follow the same
-        # pattern so a future contributor can't accidentally introduce one.
         env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
           TARGET: ${{ matrix.target }}
           BIN: ${{ matrix.bin }}
           ARCHIVE: ${{ matrix.archive }}
         run: |
           set -euo pipefail
-          if [[ -n "${GITHUB_REF_NAME-}" && "$GITHUB_REF_NAME" == v* ]]; then
-            ver="$GITHUB_REF_NAME"
-          elif [[ -n "$INPUT_TAG" ]]; then
-            ver="$INPUT_TAG"
-          else
-            ver="v$(grep -E '^version' Cargo.toml | head -1 | cut -d'"' -f2)"
-          fi
+          ver="$GITHUB_REF_NAME"
           name="dicom-viewer-${ver}-${TARGET}"
           stage="dist/release/${name}"
           mkdir -p "$stage"
