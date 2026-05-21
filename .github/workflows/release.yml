@@ -27,10 +27,10 @@ jobs:
             bin: dicom-viewer
 
           # ---- macOS ------------------------------------------------------
-          - target: x86_64-apple-darwin
-            os: macos-13
-            archive: tar.gz
-            bin: dicom-viewer
+          # - target: x86_64-apple-darwin
+          #   os: macos-13
+          #   archive: tar.gz
+          #   bin: dicom-viewer
           - target: aarch64-apple-darwin
             os: macos-14
             archive: tar.gz
