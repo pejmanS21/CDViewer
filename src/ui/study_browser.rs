@@ -1,8 +1,17 @@
+//! Left side panel — studies, series, and per-series thumbnails.
+//!
+//! Each series row is a drag source carrying a [`SeriesDragPayload`].
+//! Single-click loads the series into the active cell (or applies the MG
+//! hanging protocol via
+//! [`DicomViewerApp::select_series`](crate::app::DicomViewerApp::select_series));
+//! dragging drops the series into a specific viewport cell.
+
 use crate::app::DicomViewerApp;
 use crate::ui::theme;
 use egui::{Color32, Context, FontId, Id, Rect, SidePanel, Stroke, Vec2};
 
-/// Payload carried by sidebar drag sources: (study_idx, series_idx).
+/// Payload carried by sidebar drag sources: `(study_idx, series_idx)`
+/// into [`DicomViewerApp::studies`](crate::app::DicomViewerApp::studies).
 pub type SeriesDragPayload = (usize, usize);
 
 pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {

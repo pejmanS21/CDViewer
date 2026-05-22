@@ -3,16 +3,29 @@
 use crate::dcm::pixel::RawImage;
 use crate::dcm::study::Instance;
 
+/// First-moment statistics over a region of interest.
+///
+/// Produced by [`rect_stats`] and [`ellipse_stats`]. Values are in the
+/// same units as the underlying [`RawImage::values`] — Hounsfield Units
+/// on CT (because the modality LUT has been applied) and raw rescaled
+/// pixel values otherwise.
 #[derive(Debug, Clone, Copy)]
 pub struct RoiStats {
+    /// Arithmetic mean of pixels inside the ROI.
     pub mean: f64,
+    /// Sample standard deviation (population formula with `count` in the
+    /// denominator — adequate for a non-diagnostic overlay).
     pub std: f64,
+    /// Minimum pixel value inside the ROI.
     pub min: f64,
+    /// Maximum pixel value inside the ROI.
     pub max: f64,
+    /// Number of pixels summed.
     pub count: usize,
 }
 
 impl RoiStats {
+    /// Format the stats for overlay display, suffixing `HU` on CT.
     pub fn label(&self, modality: &str) -> String {
         let unit = if modality.eq_ignore_ascii_case("CT") {
             " HU"
@@ -43,6 +56,11 @@ fn bbox(p1: [f32; 2], p2: [f32; 2], w: u32, h: u32) -> (u32, u32, u32, u32) {
     (x0, y0, x1.max(x0), y1.max(y0))
 }
 
+/// Compute [`RoiStats`] over the axis-aligned rectangle spanned by `p1`
+/// and `p2` (in displayed-image-pixel coordinates).
+///
+/// Returns `None` when the rectangle degenerates after clamping to the
+/// image bounds.
 pub fn rect_stats(raw: &RawImage, p1: [f32; 2], p2: [f32; 2]) -> Option<RoiStats> {
     let (x0, y0, x1, y1) = bbox(p1, p2, raw.width, raw.height);
     if x1 <= x0 || y1 <= y0 {
@@ -82,6 +100,11 @@ pub fn rect_stats(raw: &RawImage, p1: [f32; 2], p2: [f32; 2]) -> Option<RoiStats
     })
 }
 
+/// Compute [`RoiStats`] over the ellipse inscribed in the rectangle
+/// spanned by `p1` and `p2` (in displayed-image-pixel coordinates).
+///
+/// Returns `None` when the bounding rectangle degenerates after clamping
+/// to the image bounds.
 pub fn ellipse_stats(raw: &RawImage, p1: [f32; 2], p2: [f32; 2]) -> Option<RoiStats> {
     let (x0, y0, x1, y1) = bbox(p1, p2, raw.width, raw.height);
     if x1 <= x0 || y1 <= y0 {
@@ -147,6 +170,9 @@ pub fn length_label(p1: [f32; 2], p2: [f32; 2], inst: &Instance, raw: &RawImage)
     }
 }
 
+/// Angle at vertex `v` between rays to `p1` and `p2`, in degrees.
+///
+/// Returns `0.0` when either ray has near-zero length.
 pub fn angle_deg(p1: [f32; 2], v: [f32; 2], p2: [f32; 2]) -> f64 {
     let a = (p1[0] - v[0], p1[1] - v[1]);
     let b = (p2[0] - v[0], p2[1] - v[1]);

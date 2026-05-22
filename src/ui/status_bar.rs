@@ -1,3 +1,9 @@
+//! Bottom status bar.
+//!
+//! Shows the last error / info message, the loaded folder, the active
+//! cell, and the portable-vs-user-data storage mode. Painted with the
+//! [`crate::ui::theme`] palette.
+
 use crate::app::DicomViewerApp;
 use crate::ui::theme;
 use egui::{Color32, Context, FontId, Frame, Margin, RichText, Stroke, TopBottomPanel};

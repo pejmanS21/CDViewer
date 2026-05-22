@@ -96,6 +96,22 @@ impl Canvas {
     }
 }
 
+/// Export the active cell's image to a PNG, optionally with annotations
+/// burned in.
+///
+/// # Arguments
+/// * `inst` — instance metadata (needed for pixel spacing on length labels).
+/// * `raw` — pre-decoded pixel buffer.
+/// * `window` — `(center, width)` to apply.
+/// * `invert` — user-invert toggle (XOR'd with `raw.photometric_invert`).
+/// * `annotations` — list to draw on top of the image.
+/// * `burn_annotations` — when `true`, draw the annotations; when `false`
+///   write a clean image.
+/// * `out_path` — destination PNG path.
+/// * `modality` — used by ROI labels to decide whether to suffix `HU`.
+///
+/// # Errors
+/// PNG write failures.
 #[allow(clippy::too_many_arguments)]
 pub fn export_current_view(
     inst: &Instance,
@@ -114,6 +130,12 @@ pub fn export_current_view(
     canvas.write_png(out_path)
 }
 
+/// Export every instance in `series` as a PNG under `out_dir`. Filenames
+/// are `slice_0001.png`, `slice_0002.png`, … in slice order. Per-slice
+/// decode failures are logged and skipped; the function only fails if the
+/// output directory can't be created.
+///
+/// Returns the number of slices successfully written.
 pub fn export_series_pngs(
     series: &Series,
     out_dir: &Path,
@@ -189,6 +211,17 @@ fn burn_into_canvas(
 
 /// PS3.15 Basic Application Confidentiality — minimal subset. Strips
 /// patient identifiers; keeps imaging tags.
+///
+/// The output is a *new* file at `dst`; the source is never modified.
+/// This is **not** a certified DICOM De-Identification implementation —
+/// only the most common direct identifiers (PatientName, PatientID,
+/// BirthDate, Sex, AccessionNumber, ReferringPhysicianName, OperatorsName,
+/// InstitutionName/Address, StationName, PatientAge/Address/Phone) are
+/// removed or blanked. Use a dedicated anonymisation pipeline for
+/// research/publication work.
+///
+/// # Errors
+/// File-open, file-write, or DICOM-encoding failures.
 pub fn anonymize_file(src: &Path, dst: &Path) -> Result<()> {
     let mut obj = open_file(src).with_context(|| format!("open {}", src.display()))?;
 
@@ -254,6 +287,11 @@ pub fn anonymize_file(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Anonymise every instance in `study` under `out_dir`, organised by
+/// series (one subdirectory per series UID).
+///
+/// Per-file failures are logged but don't abort the whole operation.
+/// Returns `(succeeded, failed)`.
 pub fn anonymize_study(study: &crate::dcm::Study, out_dir: &Path) -> Result<(usize, usize)> {
     let mut ok = 0usize;
     let mut fail = 0usize;

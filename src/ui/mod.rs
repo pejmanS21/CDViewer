@@ -1,4 +1,25 @@
 //! UI composition.
+//!
+//! The egui side of the viewer. [`draw`] is called once per frame from
+//! [`DicomViewerApp::update`](crate::app::DicomViewerApp). It paints the
+//! panels in this order:
+//!
+//! 1. `menu_bar` — top.
+//! 2. `toolbar` — top, beneath the menu bar.
+//! 3. `status_bar` — bottom.
+//! 4. `study_browser` — left side panel (optional).
+//! 5. `metadata_panel` — right side panel (optional).
+//! 6. `viewport` — central area, multi-cell grid.
+//! 7. Modal dialogs (`disclaimer`, `about`).
+//!
+//! ## Drag-and-drop quirks (egui 0.29)
+//!
+//! The sidebar uses `dnd_drag_source`. The inner `selectable_label`'s
+//! response carries click sense (`inner.inner.clicked()`); the outer
+//! response only has hover + drag. The viewport reads the payload via
+//! `DragAndDrop::payload::<SeriesDragPayload>` and consumes it with
+//! `clear_payload` on release. **Do not wrap cells in `dnd_drop_zone`** —
+//! painted-not-allocated content makes the zone collapse.
 
 mod dialogs;
 mod menu_bar;
@@ -12,12 +33,21 @@ use crate::app::DicomViewerApp;
 use crate::config::Config;
 use egui::Context;
 
+/// Transient UI state — dialog visibility, active tool, panel visibility,
+/// in-progress measurement. Persists across frames but not across runs
+/// (use [`crate::config::UiConfig`] for the latter).
 pub struct UiState {
+    /// Show the "Not for diagnostic use" modal on this run.
     pub show_disclaimer: bool,
+    /// Show the About modal on this run.
     pub show_about: bool,
+    /// Show the right-hand metadata panel.
     pub show_metadata_panel: bool,
+    /// Show the left-hand study browser.
     pub show_study_browser: bool,
+    /// Toolbar selection.
     pub active_tool: ActiveTool,
+    /// When `true`, draw existing annotations over the image.
     pub annotations_visible: bool,
     /// Mid-construction annotation (e.g. first click of a length measurement).
     pub in_progress: Option<InProgress>,
@@ -25,27 +55,57 @@ pub struct UiState {
 
 /// Click- or drag-based annotation under construction. All coords are in
 /// displayed-image pixels (post-decimation).
+///
+/// Length and Angle are click-step state machines; Rect and Ellipse are
+/// drag-state with continuously-updated `cur`.
 #[derive(Debug, Clone, Copy)]
 pub enum InProgress {
+    /// First click of a Length measurement placed.
     LengthP1([f32; 2]),
+    /// First click of an Angle measurement placed (p1).
     AngleP1([f32; 2]),
+    /// First two clicks of an Angle measurement placed (p1, vertex).
     AngleP1V([f32; 2], [f32; 2]),
-    RectDrag { start: [f32; 2], cur: [f32; 2] },
-    EllipseDrag { start: [f32; 2], cur: [f32; 2] },
+    /// Rectangle ROI being dragged.
+    RectDrag {
+        /// Where the drag started.
+        start: [f32; 2],
+        /// Current cursor position.
+        cur: [f32; 2],
+    },
+    /// Ellipse ROI being dragged.
+    EllipseDrag {
+        /// Where the drag started.
+        start: [f32; 2],
+        /// Current cursor position.
+        cur: [f32; 2],
+    },
 }
 
+/// Which toolbar button is currently active. Drives mouse-drag behaviour
+/// in the viewport. Window/Level, Pan, and Zoom are mutually exclusive
+/// with the measurement tools; middle-mouse pan works in all modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTool {
+    /// Drag to adjust window centre / width (default).
     WindowLevel,
+    /// Drag to pan the image.
     Pan,
+    /// Drag to zoom (down = in, up = out).
     Zoom,
+    /// Two-click distance measurement.
     Length,
+    /// Three-click angle measurement.
     Angle,
+    /// Drag-to-place rectangle ROI.
     RectRoi,
+    /// Drag-to-place ellipse ROI.
     EllipseRoi,
 }
 
 impl ActiveTool {
+    /// `true` for Length / Angle / RectRoi / EllipseRoi — the tools that
+    /// produce annotations.
     pub fn is_measurement(self) -> bool {
         matches!(
             self,
@@ -54,24 +114,41 @@ impl ActiveTool {
     }
 }
 
+/// Viewport grid layout — number of columns × rows of cells.
+///
+/// The viewer supports layouts from 1×1 up to 4×4. Switching layouts
+/// preserves existing [`crate::app::CellState`] entries in order and
+/// truncates extras.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridLayout {
+    /// Single cell.
     OneByOne,
+    /// Two cells side by side.
     OneByTwo,
+    /// Two cells stacked.
     TwoByOne,
+    /// 2×2 — the MG hanging-protocol layout.
     TwoByTwo,
+    /// Three cells side by side.
     OneByThree,
+    /// Three cells stacked.
     ThreeByOne,
+    /// 3 columns × 2 rows.
     TwoByThree,
+    /// 2 columns × 3 rows.
     ThreeByTwo,
+    /// 3×3 — useful for CT slabs.
     ThreeByThree,
+    /// 4 columns × 2 rows.
     TwoByFour,
+    /// 2 columns × 4 rows.
     FourByTwo,
+    /// 4×4 — maximum supported.
     FourByFour,
 }
 
 impl GridLayout {
-    /// Returns (cols, rows).
+    /// Returns `(cols, rows)`.
     pub fn dims(self) -> (usize, usize) {
         match self {
             Self::OneByOne => (1, 1),
@@ -88,10 +165,12 @@ impl GridLayout {
             Self::FourByFour => (4, 4),
         }
     }
+    /// Total cell count = `cols * rows`.
     pub fn cell_count(self) -> usize {
         let (c, r) = self.dims();
         c * r
     }
+    /// Short label for the toolbar dropdown (e.g. `"2×2"`).
     pub fn label(self) -> &'static str {
         match self {
             Self::OneByOne => "1×1",
@@ -108,6 +187,7 @@ impl GridLayout {
             Self::FourByFour => "4×4",
         }
     }
+    /// Every variant, in toolbar-display order.
     pub const ALL: [GridLayout; 12] = [
         Self::OneByOne,
         Self::OneByTwo,
@@ -125,6 +205,9 @@ impl GridLayout {
 }
 
 impl UiState {
+    /// Construct initial UI state from the persisted [`Config`] and a
+    /// disclaimer flag. The disclaimer modal is shown once per machine
+    /// (until acknowledged).
     pub fn new(show_disclaimer: bool, cfg: &Config) -> Self {
         Self {
             show_disclaimer,
@@ -138,6 +221,8 @@ impl UiState {
     }
 }
 
+/// Paint every UI panel for the current frame. Called once per frame
+/// from the app's `update` method.
 pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
     menu_bar::draw(ctx, app);
     toolbar::draw(ctx, app);

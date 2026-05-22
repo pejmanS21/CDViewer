@@ -1,3 +1,9 @@
+//! Top menu bar — File / View / Tools / Help.
+//!
+//! Entry actions: open a folder, toggle panels, apply a window preset,
+//! reset the active cell, show the About dialog. Painted with the
+//! [`crate::ui::theme`] palette.
+
 use crate::app::DicomViewerApp;
 use crate::dcm::{self, auto_window};
 use crate::ui::theme;

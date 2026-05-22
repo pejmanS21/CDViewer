@@ -11,25 +11,41 @@ use egui::{
 /// The signature amber. Warm enough to feel like a radiograph viewbox glow,
 /// muted enough to live next to medical data without screaming.
 pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0xA2, 0x2D);
+/// Darker amber for inactive accents.
 pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x8E, 0x65, 0x1F);
+/// Cool blue used to highlight numeric data (HU readouts, distances).
 pub const CYAN_DATA: Color32 = Color32::from_rgb(0x6F, 0xB3, 0xD2);
 
+/// Central panel background.
 pub const BG: Color32 = Color32::from_rgb(0x0A, 0x0B, 0x0D);
+/// Side panel background.
 pub const BG_PANEL: Color32 = Color32::from_rgb(0x0E, 0x10, 0x13);
+/// Deepest background — menu bar, status bar, modal backdrops.
 pub const BG_DEEP: Color32 = Color32::from_rgb(0x05, 0x06, 0x07);
+/// Widget surface (buttons, list rows).
 pub const BG_SURFACE: Color32 = Color32::from_rgb(0x14, 0x17, 0x1B);
+/// Hover overlay applied to surfaces.
 pub const BG_HOVER: Color32 = Color32::from_rgb(0x1C, 0x20, 0x25);
 
+/// Primary text colour.
 pub const FG: Color32 = Color32::from_rgb(0xE5, 0xE7, 0xEA);
+/// Secondary text colour.
 pub const FG_DIM: Color32 = Color32::from_rgb(0x8A, 0x8E, 0x93);
+/// Tertiary text colour for labels.
 pub const FG_FAINT: Color32 = Color32::from_rgb(0x55, 0x59, 0x5E);
 
+/// Subtle separator stroke.
 pub const LINE: Color32 = Color32::from_rgb(0x20, 0x24, 0x29);
+/// Stronger separator stroke.
 pub const LINE_BRIGHT: Color32 = Color32::from_rgb(0x33, 0x38, 0x3E);
 
+/// Error / destructive-action colour.
 pub const DANGER: Color32 = Color32::from_rgb(0xE0, 0x6C, 0x6C);
+/// Success / confirmation colour.
 pub const OK: Color32 = Color32::from_rgb(0x6C, 0xCF, 0x9A);
 
+/// Apply Workstation Noir visuals + style to the given egui context.
+/// Call once at startup.
 pub fn install(ctx: &egui::Context) {
     apply_visuals(ctx);
     apply_style(ctx);

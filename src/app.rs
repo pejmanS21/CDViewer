@@ -1,4 +1,11 @@
 //! Top-level egui application: holds shared state and drives the UI.
+//!
+//! [`DicomViewerApp`] is the single [`eframe::App`] for the viewer.
+//! Everything UI-visible — loaded studies, decoded pixel caches, the
+//! viewport grid, annotations, transient error/info banners — lives on
+//! this struct. The application is single-threaded; decode runs on the UI
+//! thread and we lean on lazy caching plus per-frame work limits
+//! (e.g. `pump_thumbnails`) to keep frame times low.
 
 use crate::config::{Config, Paths};
 use crate::dcm::annotation::{Annotation, AnnotationStore};
@@ -10,28 +17,54 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// The single eframe application.
+///
+/// Created by [`Self::new`] from [`main`](../main/index.html), then handed
+/// to [`eframe::run_native`]. Every per-frame operation goes through
+/// the `eframe::App::update` method below.
 pub struct DicomViewerApp {
+    /// Resolved data/log/exe paths. See [`Paths::resolve`].
     pub paths: Paths,
+    /// Loaded `config.toml` (or defaults on first run).
     pub config: Config,
+    /// Transient UI state — disclaimer/about dialogs, active tool, panel
+    /// visibility, in-progress measurement, etc.
     pub ui_state: ui::UiState,
 
+    /// All loaded studies (metadata only; pixels live in [`Self::raw_cache`]).
     pub studies: Vec<Study>,
+    /// Decoded pixel buffers, keyed by SOP Instance UID. Filled lazily by
+    /// [`Self::raw_for`]; cleared on [`Self::open_folder`].
     pub raw_cache: HashMap<String, Arc<RawImage>>,
+    /// SOP UIDs whose decode failed and the reason — so we don't retry
+    /// every frame.
     pub raw_failures: HashMap<String, String>,
+    /// Flattened DICOM tag rows for the metadata panel, keyed by SOP UID.
+    /// Lazily populated by [`Self::metadata_for`].
     pub metadata_cache: HashMap<String, Arc<Vec<TagRow>>>,
+    /// Substring filter applied to the metadata panel.
     pub metadata_filter: String,
     /// Sidebar previews. Lazily populated one-per-frame so the UI never
     /// stalls behind a chain of pixel decodes.
     pub thumbnails: HashMap<String, ThumbnailState>,
 
+    /// Active grid layout (1×1 up to 4×4).
     pub grid: GridLayout,
+    /// One [`CellState`] per visible viewport cell. Length matches
+    /// `grid.cell_count()`.
     pub cells: Vec<CellState>,
+    /// Index into [`Self::cells`] receiving toolbar actions and keyboard
+    /// input.
     pub active_cell: usize,
 
+    /// Per-SOP-UID annotation list, persisted to a JSON sidecar.
     pub annotation_store: AnnotationStore,
+    /// Where [`Self::annotation_store`] is loaded from / saved to.
     pub annotations_path: PathBuf,
 
+    /// Last error message — shown in the status bar.
     pub last_error: Option<String>,
+    /// Last informational message — shown in the status bar.
     pub last_info: Option<String>,
 
     /// Drag-drop drops are deferred until the *next* frame. Applying them
@@ -51,23 +84,42 @@ pub struct DicomViewerApp {
 /// All viewport state belongs to a cell, so transforms persist when
 /// switching layouts and so dragging a different series onto a cell
 /// resets only that cell.
+///
+/// **Coordinate spaces:** [`Self::pan`] is in screen pixels;
+/// [`Self::zoom`] is a unitless scale; rotation is in quarter turns.
+/// Window/level applies to the rescaled pixel values held in
+/// [`RawImage::values`](crate::dcm::pixel::RawImage::values).
 #[derive(Clone)]
 pub struct CellState {
+    /// `(study_idx, series_idx)` into [`DicomViewerApp::studies`]. `None`
+    /// for an empty cell.
     pub series_ref: Option<(usize, usize)>,
+    /// Index into the series' `instances` for the slice on screen.
     pub slice: usize,
+    /// Pan offset in screen pixels.
     pub pan: Vec2,
+    /// Display zoom (1.0 = fit to cell).
     pub zoom: f32,
+    /// Quarter-turn rotation count (0, 1, 2, 3).
     pub rotation_quarter: u8,
+    /// Horizontal flip.
     pub flip_h: bool,
+    /// Vertical flip.
     pub flip_v: bool,
+    /// Photometric inversion *requested by the user*. XOR'd with the
+    /// instance's intrinsic invert (MONOCHROME1) at render time.
     pub invert: bool,
+    /// `(center, width)` override. `None` = use the auto window.
     pub window: Option<(f64, f64)>,
+    /// Decode/render error for this cell, surfaced in the cell overlay.
     pub error: Option<String>,
-    // Cached uploaded texture, keyed by (uid, window, invert) so we know
-    // when to regenerate.
+    /// Cached uploaded texture, keyed by `(tex_uid, tex_window, tex_invert)`.
     pub tex: Option<TextureHandle>,
+    /// SOP UID the cached texture was rendered from.
     pub tex_uid: Option<String>,
+    /// Window/level the cached texture was rendered with.
     pub tex_window: Option<(f64, f64)>,
+    /// Whether the cached texture has user-invert applied.
     pub tex_invert: bool,
 }
 
@@ -93,6 +145,9 @@ impl Default for CellState {
 }
 
 impl CellState {
+    /// Reset pan/zoom/rotation/flip/invert/window to defaults. The cached
+    /// texture is left in place; the renderer notices the mismatch via
+    /// the `(tex_uid, tex_window, tex_invert)` comparison and regenerates.
     pub fn reset_view(&mut self) {
         self.pan = Vec2::ZERO;
         self.zoom = 1.0;
@@ -105,6 +160,8 @@ impl CellState {
         // notices the mismatch and regenerates.
     }
 
+    /// Bind this cell to a series and slice, discarding all previous
+    /// transform/window state. Used when a series is dragged onto a cell.
     pub fn assign(&mut self, series_ref: (usize, usize), slice: usize) {
         *self = CellState::default();
         self.series_ref = Some(series_ref);
@@ -113,6 +170,12 @@ impl CellState {
 }
 
 impl DicomViewerApp {
+    /// Build the app, install the theme, and load annotations from
+    /// `<data_dir>/annotations.json`.
+    ///
+    /// `startup_folder` defers the actual folder scan to the first
+    /// [`update`](eframe::App::update) tick so the window paints before
+    /// the (potentially CD-slow) scan begins.
     pub fn new(
         cc: &CreationContext<'_>,
         paths: Paths,
@@ -146,17 +209,23 @@ impl DicomViewerApp {
         }
     }
 
+    /// Persist [`Self::annotation_store`] to [`Self::annotations_path`].
+    /// Failures are logged but not propagated — losing one annotation save
+    /// shouldn't crash the viewer.
     pub fn save_annotations(&self) {
         if let Err(e) = self.annotation_store.save(&self.annotations_path) {
             tracing::warn!(error = %e, "annotation save failed");
         }
     }
 
+    /// Append `ann` to the list for `sop_uid` and immediately save.
     pub fn push_annotation(&mut self, sop_uid: &str, ann: Annotation) {
         self.annotation_store.push(sop_uid, ann);
         self.save_annotations();
     }
 
+    /// Drop every annotation on the instance currently shown by the active
+    /// cell and immediately save.
     pub fn clear_annotations_for_active(&mut self) {
         if let Some(inst) = self.active_instance().cloned() {
             self.annotation_store.clear_instance(&inst.sop_instance_uid);
@@ -164,6 +233,8 @@ impl DicomViewerApp {
         }
     }
 
+    /// Remove the most recently pushed annotation on the active cell's
+    /// instance and immediately save.
     pub fn undo_last_annotation_for_active(&mut self) {
         if let Some(inst) = self.active_instance().cloned() {
             self.annotation_store.pop_last(&inst.sop_instance_uid);
@@ -171,6 +242,9 @@ impl DicomViewerApp {
         }
     }
 
+    /// Switch grid layout, resizing [`Self::cells`] to match. Existing
+    /// cells are preserved in array order; extras (when shrinking) are
+    /// truncated. Resets [`Self::active_cell`] if it now falls out of range.
     pub fn set_grid(&mut self, g: GridLayout) {
         let n = g.cell_count();
         self.grid = g;
@@ -183,6 +257,11 @@ impl DicomViewerApp {
         }
     }
 
+    /// Scan a folder for DICOM files, replace [`Self::studies`], and
+    /// auto-arrange the first one. Clears every per-instance cache (raw
+    /// pixels, metadata rows, thumbnails) and every [`CellState`]. Errors
+    /// are surfaced via [`Self::last_error`] for the status bar — they're
+    /// not propagated to the caller.
     pub fn open_folder(&mut self, folder: &Path) {
         self.last_error = None;
         match dcm::loader::load_folder(folder) {
@@ -218,6 +297,8 @@ impl DicomViewerApp {
         }
     }
 
+    /// Convenience: open the parent folder of a single file. We always
+    /// load a *folder* — there is no single-file mode.
     pub fn open_file(&mut self, file: &Path) {
         if let Some(parent) = file.parent() {
             self.open_folder(parent);
@@ -368,6 +449,10 @@ impl DicomViewerApp {
         }
     }
 
+    /// Get the decoded [`RawImage`] for an instance, decoding on first
+    /// miss. Returns `None` (and remembers the failure in
+    /// [`Self::raw_failures`]) when decode fails, so the viewport doesn't
+    /// re-attempt every frame.
     pub fn raw_for(&mut self, sop_uid: &str, path: &Path) -> Option<Arc<RawImage>> {
         if let Some(r) = self.raw_cache.get(sop_uid) {
             return Some(r.clone());
@@ -390,6 +475,9 @@ impl DicomViewerApp {
         }
     }
 
+    /// Pick up files dropped onto the egui window. A dropped folder
+    /// triggers [`Self::open_folder`]; a dropped file triggers
+    /// [`Self::open_file`].
     pub fn handle_dropped_files(&mut self, ctx: &Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if dropped.is_empty() {
@@ -407,6 +495,7 @@ impl DicomViewerApp {
         }
     }
 
+    /// Apply [`CellState::reset_view`] to the active cell.
     pub fn reset_active_cell(&mut self) {
         if let Some(c) = self.cells.get_mut(self.active_cell) {
             c.reset_view();
@@ -423,7 +512,7 @@ impl DicomViewerApp {
 
     /// Sidebar asks per row: "do you have a thumbnail for this series?"
     /// We register a `Pending` entry on first miss; the per-frame pump in
-    /// [`pump_thumbnails`] decodes one at a time.
+    /// [`Self::pump_thumbnails`] decodes one at a time.
     pub fn thumbnail_for(&mut self, series_uid: &str) -> Option<TextureHandle> {
         match self.thumbnails.get(series_uid) {
             Some(ThumbnailState::Ready(t)) => Some(t.clone()),
@@ -472,6 +561,9 @@ impl DicomViewerApp {
         ctx.request_repaint();
     }
 
+    /// Get the flattened metadata rows for an instance, parsing on first
+    /// miss. Failures are logged but not cached, since metadata parsing is
+    /// cheap and unlikely to repeat-fail.
     pub fn metadata_for(&mut self, sop_uid: &str, path: &Path) -> Option<Arc<Vec<TagRow>>> {
         if let Some(rows) = self.metadata_cache.get(sop_uid) {
             return Some(rows.clone());
@@ -520,9 +612,16 @@ fn apply_visuals(ctx: &Context, _dark: bool) {
 }
 
 /// Lifecycle of a sidebar series thumbnail.
+///
+/// New entries land as [`Self::Pending`] when the sidebar first asks for a
+/// thumbnail. [`DicomViewerApp::pump_thumbnails`] decodes at most one per
+/// frame, transitioning to [`Self::Ready`] or [`Self::Failed`].
 pub enum ThumbnailState {
+    /// Queued; the per-frame pump will decode this next.
     Pending,
+    /// Decoded and uploaded as a GPU texture.
     Ready(TextureHandle),
+    /// Decode failed; don't retry.
     Failed,
 }
 

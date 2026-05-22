@@ -1,3 +1,9 @@
+//! Secondary toolbar — tool selection, grid layout, transforms.
+//!
+//! Tools are grouped: VIEW (W/L, Pan, Zoom), MEASURE (Length, Angle, Rect
+//! ROI, Ellipse ROI), TRANSFORM (rotate, flip, invert), LAYOUT (grid
+//! dropdown). Selecting a measurement tool clears any in-progress sketch.
+
 use crate::app::DicomViewerApp;
 use crate::ui::theme;
 use crate::ui::{ActiveTool, GridLayout};

@@ -9,18 +9,32 @@ use dicom::object::OpenFileOptions;
 use dicom_dictionary_std::{tags, StandardDataDictionary};
 use std::path::Path;
 
+/// One row in the metadata panel.
+///
+/// Produced by [`collect_tags`] and rendered by the right-hand metadata
+/// panel. Sequences are flattened to a single row with a placeholder
+/// `<sequence, N item(s)>` in [`Self::value`]; nested items are not
+/// recursed into.
 #[derive(Debug, Clone)]
 pub struct TagRow {
+    /// DICOM tag (group, element).
     pub tag: Tag,
+    /// VR mnemonic ("CS", "DS", "SQ", …).
     pub vr: String,
+    /// Standard data-dictionary alias for the tag, or `"(unknown)"`.
     pub name: String,
+    /// Formatted value. Binary values are surfaced as `"<binary value>"`;
+    /// long strings are truncated with an ellipsis.
     pub value: String,
 }
 
 impl TagRow {
+    /// `"(GGGG,EEEE)"`-style tag label for the panel.
     pub fn tag_label(&self) -> String {
         format!("({:04X},{:04X})", self.tag.0, self.tag.1)
     }
+    /// Human-readable section name for the tag's group, used to group
+    /// rows in the panel.
     pub fn group_label(&self) -> String {
         match self.tag.0 {
             0x0002 => "0002 — File Meta",
@@ -51,6 +65,13 @@ impl TagRow {
     }
 }
 
+/// Flatten every top-level DICOM tag in `path` into a sorted list of
+/// [`TagRow`]s. Stops at `PIXEL_DATA` — pixel bytes never reach this code
+/// path.
+///
+/// # Errors
+/// Returns an error when the file can't be opened with the dicom-rs
+/// metadata reader.
 pub fn collect_tags(path: &Path) -> Result<Vec<TagRow>> {
     let obj = OpenFileOptions::new()
         .read_until(tags::PIXEL_DATA)

@@ -9,9 +9,13 @@ use std::path::Path;
 
 use crate::dcm::pixel::{auto_window, load_raw};
 
+/// Small RGBA buffer ready for `ColorImage::from_rgba_unmultiplied`.
 pub struct Thumbnail {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// RGBA8 bytes, row-major.
     pub rgba: Vec<u8>,
 }
 
