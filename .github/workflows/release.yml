@@ -92,7 +92,7 @@ jobs:
           mkdir -p "$stage"
 
           cp "target/${TARGET}/release/${BIN}" "$stage/"
-          for f in dist/README.txt dist/HELP.txt LICENSE LICENSE-MIT LICENSE-APACHE; do
+          for f in dist/README.txt dist/HELP.txt LICENSE CHANGELOG.md; do
             [[ -f "$f" ]] && cp "$f" "$stage/" || true
           done
           if [[ "$RUNNER_OS" == "Windows" ]]; then
