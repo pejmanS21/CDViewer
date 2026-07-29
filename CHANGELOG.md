@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.1] — 2026-07-29
+
+### Performance
+
+- Folder scan (`load_folder`) no longer reopens each DICOM file up to 3×
+  to look up study/series UIDs and per-group metadata — everything is now
+  read once, in the existing parallel pass. Matters most on slow optical
+  (CD/DVD) media, where every extra file open costs a seek.
+- Dropped a serial magic-byte probe on extensionless files during the
+  folder walk in favour of `dicom-object`'s own fast preamble-parse
+  failure, moving that check into the parallel pass.
+- Decoded-pixel cache (`raw_cache`) is now bounded by a 256 MB byte
+  budget (oldest evicted first) instead of growing without limit, so
+  scrolling a long CT/MR stack can't exhaust memory on low-RAM Windows
+  machines.
+- Release `opt-level` raised from `"z"` to `3` for real execution speed
+  (e.g. the per-pixel window/level render path), trading a modest binary
+  size increase that's dwarfed by the DICOM payload shipped alongside the
+  exe.
+
 ## [0.1.0] — 2026-05-22
 
 Initial public release. CDViewer is a portable, non-diagnostic DICOM viewer
@@ -143,5 +163,6 @@ in Rust, designed to ship on study CDs/DVDs as a single executable.
 - UI uses `eframe` / `egui` 0.29 with the `wgpu` renderer feature; the
   `glow` feature is intentionally **not** enabled.
 
-[Unreleased]: https://github.com/pejmanS21/CDViewer/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/pejmanS21/CDViewer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/pejmanS21/CDViewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pejmanS21/CDViewer/releases/tag/v0.1.0
