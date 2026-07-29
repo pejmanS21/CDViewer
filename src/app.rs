@@ -13,9 +13,17 @@ use crate::dcm::{self, metadata::TagRow, RawImage, Study};
 use crate::ui::{self, GridLayout};
 use eframe::CreationContext;
 use egui::{Context, TextureHandle, Vec2};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Byte budget for [`DicomViewerApp::raw_cache`] pixel data before the
+/// oldest entry is evicted. Decoded frames vary hugely — a 512×512 CT
+/// slice is ~1 MB of `f32`, but a decimated mammogram at
+/// `MAX_DISPLAY_DIM` (2048 px/side) is ~16 MB — so the bound is on bytes,
+/// not entry count: an entry cap would let full-res stacks blow past any
+/// memory target on the low-RAM Windows machines this viewer ships to.
+const RAW_CACHE_MAX_BYTES: usize = 256 * 1024 * 1024;
 
 /// The single eframe application.
 ///
@@ -34,8 +42,17 @@ pub struct DicomViewerApp {
     /// All loaded studies (metadata only; pixels live in [`Self::raw_cache`]).
     pub studies: Vec<Study>,
     /// Decoded pixel buffers, keyed by SOP Instance UID. Filled lazily by
-    /// [`Self::raw_for`]; cleared on [`Self::open_folder`].
+    /// [`Self::raw_for`]; cleared on [`Self::open_folder`]. Bounded to
+    /// [`RAW_CACHE_MAX_BYTES`] of pixel data (oldest evicted first) so
+    /// scrolling a long CT/MR stack can't grow this without limit on
+    /// low-RAM Windows targets.
     pub raw_cache: HashMap<String, Arc<RawImage>>,
+    /// Insertion order for [`Self::raw_cache`], oldest first. Drives FIFO
+    /// eviction in [`Self::raw_for`].
+    raw_cache_order: VecDeque<String>,
+    /// Total bytes of `values` held in [`Self::raw_cache`]; compared
+    /// against [`RAW_CACHE_MAX_BYTES`] to drive eviction.
+    raw_cache_bytes: usize,
     /// SOP UIDs whose decode failed and the reason — so we don't retry
     /// every frame.
     pub raw_failures: HashMap<String, String>,
@@ -193,6 +210,8 @@ impl DicomViewerApp {
             ui_state,
             studies: Vec::new(),
             raw_cache: HashMap::new(),
+            raw_cache_order: VecDeque::new(),
+            raw_cache_bytes: 0,
             raw_failures: HashMap::new(),
             metadata_cache: HashMap::new(),
             metadata_filter: String::new(),
@@ -272,6 +291,8 @@ impl DicomViewerApp {
             Ok(studies) => {
                 self.studies = studies;
                 self.raw_cache.clear();
+                self.raw_cache_order.clear();
+                self.raw_cache_bytes = 0;
                 self.raw_failures.clear();
                 self.metadata_cache.clear();
                 self.thumbnails.clear();
@@ -464,6 +485,22 @@ impl DicomViewerApp {
             Ok(r) => {
                 let arc = Arc::new(r);
                 self.raw_cache.insert(sop_uid.to_string(), arc.clone());
+                self.raw_cache_order.push_back(sop_uid.to_string());
+                self.raw_cache_bytes += arc.values.len() * std::mem::size_of::<f32>();
+                // ponytail: FIFO, not true LRU — good enough to bound memory
+                // during linear slice scrolling; revisit if profiling shows
+                // thrash on non-linear access patterns (e.g. jumping cells).
+                // Always keep the newest entry, even if it alone exceeds
+                // the budget — evicting what we just decoded would thrash.
+                while self.raw_cache_bytes > RAW_CACHE_MAX_BYTES && self.raw_cache_order.len() > 1 {
+                    if let Some(oldest) = self.raw_cache_order.pop_front() {
+                        if let Some(evicted) = self.raw_cache.remove(&oldest) {
+                            self.raw_cache_bytes = self
+                                .raw_cache_bytes
+                                .saturating_sub(evicted.values.len() * std::mem::size_of::<f32>());
+                        }
+                    }
+                }
                 Some(arc)
             }
             Err(e) => {

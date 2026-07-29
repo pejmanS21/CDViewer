@@ -74,32 +74,20 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 fn looks_like_dicom(p: &Path) -> bool {
     // Accept .dcm explicitly; otherwise accept files with no extension
     // (common on CDs) and let the parser reject non-DICOM content.
+    //
+    // ponytail: no magic-byte probe here anymore — that used to mean an
+    // extra serial file open+seek+read per extensionless file during the
+    // recursive walk (expensive on optical media). dicom-object's own
+    // preamble/meta-header parse (see `parse_instance`, run in parallel
+    // via rayon) already fails fast and cheaply on non-DICOM content, so
+    // probing twice bought nothing but latency.
     match p.extension().and_then(|e| e.to_str()) {
         Some(ext) => ext.eq_ignore_ascii_case("dcm") || ext.eq_ignore_ascii_case("dicom"),
         None => {
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            !name.starts_with('.') && name != "DICOMDIR" && {
-                // Heuristic: probe the DICOM "DICM" magic at byte 128.
-                file_has_dicm_magic(p).unwrap_or(false)
-            }
+            !name.starts_with('.') && name != "DICOMDIR"
         }
     }
-}
-
-fn file_has_dicm_magic(p: &Path) -> std::io::Result<bool> {
-    use std::io::{Read, Seek, SeekFrom};
-    // nosemgrep: path-traversal — `p` is a regular file already vetted by
-    // `walk` (symlinks pre-filtered, see comment there). The probe reads
-    // exactly 4 bytes at offset 128 and returns a bool; no path-controlled
-    // content is reflected back or written anywhere.
-    let mut f = std::fs::File::open(p)?;
-    if f.metadata()?.len() < 132 {
-        return Ok(false);
-    }
-    f.seek(SeekFrom::Start(128))?;
-    let mut buf = [0u8; 4];
-    f.read_exact(&mut buf)?;
-    Ok(&buf == b"DICM")
 }
 
 fn parse_instance(path: &Path) -> Result<Instance, ReadError> {
@@ -155,6 +143,14 @@ fn parse_instance(path: &Path) -> Result<Instance, ReadError> {
     Ok(Instance {
         path: path.to_path_buf(),
         sop_instance_uid: take_str(tags::SOP_INSTANCE_UID),
+        study_instance_uid: take_str(tags::STUDY_INSTANCE_UID),
+        series_instance_uid: take_str(tags::SERIES_INSTANCE_UID),
+        patient_name: take_str(tags::PATIENT_NAME),
+        patient_id: take_str(tags::PATIENT_ID),
+        study_date: take_str(tags::STUDY_DATE),
+        study_description: take_str(tags::STUDY_DESCRIPTION),
+        series_description: take_str(tags::SERIES_DESCRIPTION),
+        series_number: take_int(tags::SERIES_NUMBER, 0),
         instance_number: take_int(tags::INSTANCE_NUMBER, 0),
         rows: take_u16(tags::ROWS, 0),
         cols: take_u16(tags::COLUMNS, 0),
@@ -172,23 +168,31 @@ fn parse_instance(path: &Path) -> Result<Instance, ReadError> {
 }
 
 fn group_into_studies(instances: Vec<Instance>) -> Vec<Study> {
-    // study UID -> series UID -> Vec<Instance>
+    // study UID -> series UID -> Vec<Instance>. All grouping keys and
+    // study/series-level metadata come straight off the `Instance` fields
+    // `parse_instance` already read — no re-opening files here.
     let mut by_study: BTreeMap<String, BTreeMap<String, Vec<Instance>>> = BTreeMap::new();
     let mut study_meta: BTreeMap<String, StudyMeta> = BTreeMap::new();
     let mut series_meta: BTreeMap<(String, String), SeriesMeta> = BTreeMap::new();
 
     for inst in instances {
-        let study_uid = read_meta_tag(&inst.path, tags::STUDY_INSTANCE_UID)
-            .unwrap_or_else(|| "(unknown study)".into());
-        let series_uid = read_meta_tag(&inst.path, tags::SERIES_INSTANCE_UID)
-            .unwrap_or_else(|| "(unknown series)".into());
+        let study_uid = if inst.study_instance_uid.is_empty() {
+            "(unknown study)".to_string()
+        } else {
+            inst.study_instance_uid.clone()
+        };
+        let series_uid = if inst.series_instance_uid.is_empty() {
+            "(unknown series)".to_string()
+        } else {
+            inst.series_instance_uid.clone()
+        };
 
         study_meta
             .entry(study_uid.clone())
-            .or_insert_with(|| StudyMeta::read(&inst.path));
+            .or_insert_with(|| StudyMeta::from(&inst));
         series_meta
             .entry((study_uid.clone(), series_uid.clone()))
-            .or_insert_with(|| SeriesMeta::read(&inst.path));
+            .or_insert_with(|| SeriesMeta::from(&inst));
 
         by_study
             .entry(study_uid)
@@ -268,27 +272,13 @@ struct StudyMeta {
     study_description: String,
 }
 
-impl StudyMeta {
-    fn read(path: &Path) -> Self {
-        let obj = match OpenFileOptions::new()
-            .read_until(tags::PIXEL_DATA)
-            .open_file(path)
-        {
-            Ok(o) => o,
-            Err(_) => return Self::default(),
-        };
-        let s = |tag| {
-            obj.element(tag)
-                .ok()
-                .and_then(|e| e.to_str().ok())
-                .map(|s| s.trim_end_matches('\0').trim().to_string())
-                .unwrap_or_default()
-        };
+impl From<&Instance> for StudyMeta {
+    fn from(inst: &Instance) -> Self {
         Self {
-            patient_name: s(tags::PATIENT_NAME),
-            patient_id: s(tags::PATIENT_ID),
-            study_date: s(tags::STUDY_DATE),
-            study_description: s(tags::STUDY_DESCRIPTION),
+            patient_name: inst.patient_name.clone(),
+            patient_id: inst.patient_id.clone(),
+            study_date: inst.study_date.clone(),
+            study_description: inst.study_description.clone(),
         }
     }
 }
@@ -300,44 +290,12 @@ struct SeriesMeta {
     series_number: i32,
 }
 
-impl SeriesMeta {
-    fn read(path: &Path) -> Self {
-        let obj = match OpenFileOptions::new()
-            .read_until(tags::PIXEL_DATA)
-            .open_file(path)
-        {
-            Ok(o) => o,
-            Err(_) => return Self::default(),
-        };
+impl From<&Instance> for SeriesMeta {
+    fn from(inst: &Instance) -> Self {
         Self {
-            modality: obj
-                .element(tags::MODALITY)
-                .ok()
-                .and_then(|e| e.to_str().ok())
-                .map(|s| s.trim_end_matches('\0').trim().to_string())
-                .unwrap_or_default(),
-            description: obj
-                .element(tags::SERIES_DESCRIPTION)
-                .ok()
-                .and_then(|e| e.to_str().ok())
-                .map(|s| s.trim_end_matches('\0').trim().to_string())
-                .unwrap_or_default(),
-            series_number: obj
-                .element(tags::SERIES_NUMBER)
-                .ok()
-                .and_then(|e| e.to_int::<i32>().ok())
-                .unwrap_or(0),
+            modality: inst.modality.clone(),
+            description: inst.series_description.clone(),
+            series_number: inst.series_number,
         }
     }
-}
-
-fn read_meta_tag(path: &Path, tag: dicom::core::Tag) -> Option<String> {
-    let obj = OpenFileOptions::new()
-        .read_until(tags::PIXEL_DATA)
-        .open_file(path)
-        .ok()?;
-    obj.element(tag)
-        .ok()
-        .and_then(|e| e.to_str().ok())
-        .map(|s| s.trim_end_matches('\0').trim().to_string())
 }

@@ -19,6 +19,23 @@ pub struct Instance {
     /// SOP Instance UID — used as the cache key for pixel data,
     /// annotations, and rendered textures.
     pub sop_instance_uid: String,
+    /// Study Instance UID — read once here so [`crate::dcm::loader::group_into_studies`]
+    /// never has to reopen the file to learn which study/series it belongs to.
+    pub study_instance_uid: String,
+    /// Series Instance UID.
+    pub series_instance_uid: String,
+    /// `PatientName`, raw DICOM-encoded string.
+    pub patient_name: String,
+    /// `PatientID`.
+    pub patient_id: String,
+    /// `StudyDate` (YYYYMMDD). Empty when missing.
+    pub study_date: String,
+    /// `StudyDescription`.
+    pub study_description: String,
+    /// `SeriesDescription`, if present.
+    pub series_description: String,
+    /// `SeriesNumber` — drives sidebar ordering within a study.
+    pub series_number: i32,
     /// `InstanceNumber` — slice ordering fallback when ImagePositionPatient
     /// is missing.
     pub instance_number: i32,
