@@ -15,7 +15,7 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
         .frame(
             Frame::default()
                 .fill(theme::BG_PANEL)
-                .stroke(Stroke::new(1.0, theme::ACCENT))
+                .stroke(Stroke::new(1.0_f32, theme::ACCENT))
                 .inner_margin(Margin::same(24.0)),
         )
         .show(ctx, |ui| {
@@ -50,7 +50,7 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
                             .color(theme::BG),
                     )
                     .fill(theme::ACCENT)
-                    .stroke(Stroke::new(1.0, theme::ACCENT));
+                    .stroke(Stroke::new(1.0_f32, theme::ACCENT));
                     if ui.add_sized([130.0, 28.0], btn).clicked() {
                         acknowledged = true;
                     }

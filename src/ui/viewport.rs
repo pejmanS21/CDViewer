@@ -205,7 +205,7 @@ fn paint_cell_contents(
         theme::paint_active_brackets(&ui.painter_at(rect), rect, theme::ACCENT, 14.0);
     } else {
         ui.painter()
-            .rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0, theme::LINE));
+            .rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(1.0_f32, theme::LINE));
     }
 }
 
@@ -219,7 +219,7 @@ fn draw_empty_cell(ui: &Ui, rect: Rect, is_active: bool) {
 
     // A subtle centred reticle.
     let c = rect.center();
-    let s = Stroke::new(1.0, theme::LINE_BRIGHT);
+    let s = Stroke::new(1.0_f32, theme::LINE_BRIGHT);
     let arm = 8.0;
     let gap = 3.0;
     painter.line_segment([c - Vec2::new(arm, 0.0), c - Vec2::new(gap, 0.0)], s);
@@ -749,7 +749,7 @@ fn draw_annotation(
         Annotation::Length { p1, p2 } => {
             let a = to_screen(*p1);
             let b = to_screen(*p2);
-            let stroke = Stroke::new(1.5, LEN_COLOR);
+            let stroke = Stroke::new(1.5_f32, LEN_COLOR);
             painter.line_segment([a, b], stroke);
             painter.circle_filled(a, 3.0, LEN_COLOR);
             painter.circle_filled(b, 3.0, LEN_COLOR);
@@ -761,7 +761,7 @@ fn draw_annotation(
             let s_p1 = to_screen(*p1);
             let s_v = to_screen(*v);
             let s_p2 = to_screen(*p2);
-            let stroke = Stroke::new(1.5, ANG_COLOR);
+            let stroke = Stroke::new(1.5_f32, ANG_COLOR);
             painter.line_segment([s_v, s_p1], stroke);
             painter.line_segment([s_v, s_p2], stroke);
             painter.circle_filled(s_p1, 3.0, ANG_COLOR);
@@ -779,7 +779,7 @@ fn draw_annotation(
             let a = to_screen(*p1);
             let b = to_screen(*p2);
             let r = Rect::from_two_pos(a, b);
-            painter.rect_stroke(r, 0.0, Stroke::new(1.5, RECT_COLOR));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.5_f32, RECT_COLOR));
             if let Some(stats) = rect_stats(raw, *p1, *p2) {
                 label_text(
                     painter,
@@ -816,7 +816,7 @@ fn draw_in_progress(
     let raw_w = raw.width as f32;
     let raw_h = raw.height as f32;
     let to_screen = |p: [f32; 2]| image_to_screen(p, raw_w, raw_h, cell, dst);
-    let stroke = Stroke::new(1.5, PROG_COLOR);
+    let stroke = Stroke::new(1.5_f32, PROG_COLOR);
     match prog {
         InProgress::LengthP1(p) | InProgress::AngleP1(p) => {
             painter.circle_filled(to_screen(p), 4.0, PROG_COLOR);

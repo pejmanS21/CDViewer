@@ -59,7 +59,7 @@ fn apply_visuals(ctx: &egui::Context) {
     v.override_text_color = Some(FG);
 
     v.window_fill = BG_PANEL;
-    v.window_stroke = Stroke::new(1.0, LINE);
+    v.window_stroke = Stroke::new(1.0_f32, LINE);
     v.window_shadow = Shadow::NONE;
     v.popup_shadow = Shadow::NONE;
     v.menu_rounding = r0;
@@ -76,14 +76,14 @@ fn apply_visuals(ctx: &egui::Context) {
     v.error_fg_color = DANGER;
 
     v.selection.bg_fill = Color32::from_rgba_unmultiplied(0xE8, 0xA2, 0x2D, 60);
-    v.selection.stroke = Stroke::new(1.0, ACCENT);
+    v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
 
     // Widget palette: noninteractive < inactive < hovered < active.
     let mk = |bg: Color32, bg_stroke: Color32, fg_stroke: Color32| egui::style::WidgetVisuals {
         bg_fill: bg,
         weak_bg_fill: bg,
-        bg_stroke: Stroke::new(1.0, bg_stroke),
-        fg_stroke: Stroke::new(1.0, fg_stroke),
+        bg_stroke: Stroke::new(1.0_f32, bg_stroke),
+        fg_stroke: Stroke::new(1.0_f32, fg_stroke),
         rounding: r0,
         expansion: 0.0,
     };
@@ -145,7 +145,7 @@ fn apply_style(ctx: &egui::Context) {
 /// Reusable: paint amber L-brackets at two diagonal corners. Used for the
 /// active-viewport indicator — no full border, just a viewfinder frame.
 pub fn paint_active_brackets(painter: &egui::Painter, rect: egui::Rect, color: Color32, arm: f32) {
-    let s = Stroke::new(1.5, color);
+    let s = Stroke::new(1.5_f32, color);
     let r = rect.shrink(2.0);
     let tl = r.left_top();
     let br = r.right_bottom();
@@ -162,7 +162,7 @@ pub fn hairline(ui: &mut egui::Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(avail, 1.0), egui::Sense::hover());
     ui.painter().line_segment(
         [rect.left_center(), rect.right_center()],
-        Stroke::new(1.0, color),
+        Stroke::new(1.0_f32, color),
     );
 }
 

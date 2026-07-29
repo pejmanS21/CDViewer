@@ -202,7 +202,7 @@ fn series_row(
             rect.left_bottom() + Vec2::new(0.0, -0.5),
             rect.right_bottom() + Vec2::new(0.0, -0.5),
         ],
-        Stroke::new(1.0, theme::LINE),
+        Stroke::new(1.0_f32, theme::LINE),
     );
 
     // Left vertical accent bar when selected.
@@ -212,7 +212,7 @@ fn series_row(
                 rect.left_top() + Vec2::new(1.0, 2.0),
                 rect.left_bottom() + Vec2::new(1.0, -2.0),
             ],
-            Stroke::new(2.0, theme::ACCENT),
+            Stroke::new(2.0_f32, theme::ACCENT),
         );
     }
 
@@ -223,7 +223,7 @@ fn series_row(
         Vec2::new(thumb_size, thumb_size),
     );
     painter.rect_filled(thumb_rect, 0.0, theme::BG_DEEP);
-    painter.rect_stroke(thumb_rect, 0.0, Stroke::new(1.0, theme::LINE));
+    painter.rect_stroke(thumb_rect, 0.0, Stroke::new(1.0_f32, theme::LINE));
 
     if let Some(tex) = thumbnail {
         let img_size = tex.size_vec2();

@@ -12,7 +12,7 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
         .frame(
             Frame::default()
                 .fill(theme::BG_PANEL)
-                .stroke(Stroke::new(1.0, theme::LINE))
+                .stroke(Stroke::new(1.0_f32, theme::LINE))
                 .inner_margin(Margin::symmetric(10.0, 10.0)),
         )
         .show(ctx, |ui| {

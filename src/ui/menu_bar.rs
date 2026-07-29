@@ -14,7 +14,7 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
         .frame(
             Frame::default()
                 .fill(theme::BG_DEEP)
-                .stroke(Stroke::new(1.0, theme::LINE))
+                .stroke(Stroke::new(1.0_f32, theme::LINE))
                 .inner_margin(Margin::symmetric(10.0, 4.0)),
         )
         .show(ctx, |ui| {
@@ -33,7 +33,7 @@ pub fn draw(ctx: &Context, app: &mut DicomViewerApp) {
                         egui::pos2(ui.cursor().min.x - 6.0, ui.cursor().min.y),
                         egui::pos2(ui.cursor().min.x - 6.0, ui.cursor().min.y + 14.0),
                     ],
-                    Stroke::new(1.0, theme::LINE),
+                    Stroke::new(1.0_f32, theme::LINE),
                 );
                 egui::menu::bar(ui, |ui| {
                     ui.menu_button("File", |ui| {
