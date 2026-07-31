@@ -354,9 +354,35 @@ fn paint_corner_overlays(
     y -= g_wl.size().y + 1.0;
     painter.galley(Pos2::new(br.x - g_wl.size().x, y), g_wl, theme::CYAN_DATA);
 
-    // Patient name (subtle, top-centre) — small reminder of context
-    if !instance.modality.is_empty() {
-        // Already shown via chip; keep patient name only if non-empty in instance.
+    // Top-centre: patient name / ID / study UID — subtle context reminder.
+    let mut header = String::new();
+    if !instance.patient_name.is_empty() {
+        header.push_str(&instance.patient_name);
+    }
+    if !instance.patient_id.is_empty() {
+        if !header.is_empty() {
+            header.push_str("  ·  ");
+        }
+        header.push_str("ID ");
+        header.push_str(&instance.patient_id);
+    }
+    if !instance.study_instance_uid.is_empty() {
+        if !header.is_empty() {
+            header.push_str("  ·  ");
+        }
+        header.push_str("STUDY …");
+        header.push_str(
+            &instance.study_instance_uid[instance.study_instance_uid.len().saturating_sub(12)..],
+        );
+    }
+    if !header.is_empty() {
+        painter.text(
+            rect.center_top() + Vec2::new(0.0, pad.y),
+            Align2::CENTER_TOP,
+            header,
+            prop.clone(),
+            theme::FG_DIM,
+        );
     }
 }
 
