@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.2] — 2026-08-03
+
+### Added
+
+- Viewport overlay now shows patient name, patient ID, and study instance UID
+  in the top-centre corner, replacing the previous dead placeholder.
+
+### Fixed
+
+- Silenced `float_literal_f32_fallback` warnings across 24
+  `egui::Stroke::new` call sites in 8 UI modules by explicitly suffixing
+  float literals as `f32` — a newer stable toolchain now flags the previous
+  implicit fallback as future-incompatible (rust-lang/rust#154024).
+
 ## [0.1.1] — 2026-07-29
 
 ### Performance
@@ -163,6 +177,7 @@ in Rust, designed to ship on study CDs/DVDs as a single executable.
 - UI uses `eframe` / `egui` 0.29 with the `wgpu` renderer feature; the
   `glow` feature is intentionally **not** enabled.
 
-[Unreleased]: https://github.com/pejmanS21/CDViewer/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/pejmanS21/CDViewer/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/pejmanS21/CDViewer/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/pejmanS21/CDViewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pejmanS21/CDViewer/releases/tag/v0.1.0
