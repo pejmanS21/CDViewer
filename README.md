@@ -71,7 +71,8 @@ cargo build --release
 ./target/release/dicom-viewer
 ```
 
-On Linux, the eframe wgpu backend needs a few system packages:
+Releases ship only `x86_64-pc-windows-msvc`; other platforms are build-from-source
+for development. On Linux, the eframe backend needs a few system packages:
 
 ```bash
 sudo apt-get install -y \

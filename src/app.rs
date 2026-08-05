@@ -87,8 +87,8 @@ pub struct DicomViewerApp {
     /// Drag-drop drops are deferred until the *next* frame. Applying them
     /// inline during `viewport::draw` would free the cell's TextureHandle
     /// while shapes referencing that texture are still in the current
-    /// frame's command buffer — wgpu panics with
-    /// "Texture … has been destroyed".
+    /// frame's paint list — the renderer then reads a texture that no
+    /// longer exists. Still required under `glow`.
     pending_drops: Vec<(usize, (usize, usize))>,
 
     /// Folder to load on the first update tick. Set when the binary is
@@ -666,7 +666,7 @@ impl eframe::App for DicomViewerApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         // CRITICAL: apply drops queued by last frame *before* rendering.
         // See `pending_drops` doc comment — dropping a TextureHandle
-        // mid-frame triggers a wgpu "texture destroyed" panic.
+        // mid-frame leaves the renderer painting a freed texture.
         self.flush_pending_drops();
         self.handle_dropped_files(ctx);
         // Auto-load on first frame so the empty UI shows for one tick
@@ -683,7 +683,7 @@ impl eframe::App for DicomViewerApp {
         self.pump_thumbnails(ctx);
     }
 
-    fn on_exit(&mut self) {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if let Err(e) = self.config.save(&self.paths) {
             tracing::warn!(error = %e, "failed to save config on exit");
         }

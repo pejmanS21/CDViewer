@@ -1,0 +1,14 @@
+# Statically link the MSVC C runtime on Windows.
+#
+# Without this the .exe needs the matching "Visual C++ Redistributable"
+# installed on the target machine; on a PC that lacks it the viewer dies
+# at startup with a missing-DLL box instead of opening. Since this ships
+# as the only software on a study CD — often onto machines nobody
+# controls or can install onto — the runtime has to be inside the binary.
+#
+# Costs a few hundred KB. Buys "double-click and it runs, always".
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -1,6 +1,6 @@
 [package]
 name = "dicom-viewer"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["AIMedic"]
 description = "Portable, non-diagnostic DICOM viewer"
@@ -21,10 +21,20 @@ path = "src/main.rs"
 # wayland + x11 are no-ops on macOS/Windows; on Linux they pull the
 # matching winit backend in (without them, winit fails with
 # "platform not supported by winit" on Linux).
+#
+# `glow` (OpenGL 3.3), NOT `wgpu`. This is a CD-distribution constraint,
+# not a preference: wgpu on Windows needs DX12 (Windows 10 + feature-level
+# 11 hardware) or Vulkan drivers, so it fails to *launch* on older Intel
+# HD parts, stock Win7/8.1 boxes, VMs and RDP sessions. OpenGL 3.3 goes
+# back to ~2011 Intel HD 3000. It is also much smaller — no naga, no
+# DX12/Vulkan HAL backends.
+#
+# `persistence` is deliberately absent: window/UI state is saved by
+# `config::Config` (TOML) and annotations by `dcm::annotation` (JSON),
+# so eframe's own storage layer would be dead weight.
 eframe = { version = "0.29", default-features = false, features = [
     "default_fonts",
-    "wgpu",
-    "persistence",
+    "glow",
     "wayland",
     "x11",
 ] }

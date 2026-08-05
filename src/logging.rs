@@ -8,7 +8,7 @@
 //!   `cargo run` shows the logs).
 //!
 //! The filter respects `RUST_LOG`, defaulting to
-//! `info,wgpu_core=warn,wgpu_hal=warn,naga=warn` when unset.
+//! `info,eframe=warn,egui_glow=warn` when unset.
 
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
@@ -28,7 +28,7 @@ pub fn init(paths: &Paths) -> Result<WorkerGuard> {
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,wgpu_core=warn,wgpu_hal=warn,naga=warn"));
+        .unwrap_or_else(|_| EnvFilter::new("info,eframe=warn,egui_glow=warn"));
 
     let file_layer = fmt::layer()
         .with_writer(file_writer)

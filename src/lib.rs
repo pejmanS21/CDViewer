@@ -54,8 +54,14 @@
 //!
 //! These were chosen deliberately; don't change them without discussion:
 //!
-//! - **UI framework**: [`egui`] via [`eframe`] with the `wgpu` renderer.
-//!   `glow` is intentionally not enabled.
+//! - **UI framework**: [`egui`] via [`eframe`] with the `glow` (OpenGL 3.3)
+//!   renderer. `wgpu` is intentionally not enabled: it needs DX12
+//!   (Windows 10 + feature-level 11 hardware) or Vulkan drivers, so it
+//!   fails to *launch* on the older/weaker PCs a study CD lands on.
+//!   OpenGL 3.3 reaches back to ~2011 Intel HD 3000, and dropping wgpu
+//!   also drops `naga` and the DX12/Vulkan backends from the binary.
+//! - **eframe `persistence` stays off**: window state is saved by
+//!   [`config::Config`], annotations by [`dcm::annotation`].
 //! - **DICOM**: the [`dicom-rs`](https://docs.rs/dicom) 0.7 family
 //!   (`dicom`, `dicom-pixeldata`, `dicom-dictionary-std`).
 //! - **Concurrency**: decode is on the UI thread. No `tokio`. MG-sized

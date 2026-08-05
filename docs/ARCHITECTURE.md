@@ -194,9 +194,17 @@ where to look.
 These have been deliberately chosen and tested. Don't change them without
 discussion.
 
-- **UI**: `egui` via `eframe` with the `wgpu` renderer feature. No system
-  deps, statically linked. eframe's `glow` feature is **not** enabled —
-  `App::on_exit` takes `&mut self` only.
+- **UI**: `egui` via `eframe` with the **`glow`** (OpenGL 3.3) renderer
+  feature. No system deps, statically linked. `wgpu` is **not** enabled:
+  on Windows it requires DX12 (Windows 10 + feature-level 11 hardware) or
+  Vulkan drivers, so it fails to launch on older Intel HD parts, VMs and
+  RDP sessions — exactly the machines a study CD gets handed to. OpenGL
+  3.3 reaches back to ~2011 hardware, and dropping `wgpu` also drops
+  `naga` and the DX12/Vulkan backends from the binary. Consequence:
+  `App::on_exit` takes `(&mut self, Option<&eframe::glow::Context>)`.
+- **Windows CRT**: statically linked via `.cargo/config.toml`
+  (`+crt-static`), so the exe needs no VC++ Redistributable on the target
+  machine.
 - **DICOM**: `dicom-rs` 0.7 family. Sequences are surfaced as
   `<sequence, N item(s)>` in the metadata panel; no recursion yet.
 - **Concurrency**: Decode is on the UI thread. There is no `tokio`. MG-sized

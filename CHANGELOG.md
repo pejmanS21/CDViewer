@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.3] — 2026-08-05
+
+### Changed
+
+- **Renderer switched from `wgpu` to `glow` (OpenGL 3.3).** `wgpu` on Windows
+  requires DX12 (Windows 10 + feature-level 11 hardware) or Vulkan drivers, so
+  it failed to *launch* on older Intel HD parts, virtual machines and RDP
+  sessions — precisely the machines a study CD gets handed to. OpenGL 3.3
+  reaches back to ~2011-era hardware. `eframe::App::on_exit` consequently now
+  takes `(&mut self, Option<&eframe::glow::Context>)`.
+- Windows builds statically link the MSVC C runtime (`.cargo/config.toml`,
+  `-C target-feature=+crt-static`), so the executable runs on a machine with no
+  Visual C++ Redistributable installed instead of failing at startup with a
+  missing-DLL error.
+- CI and Release workflows build **only** `x86_64-pc-windows-msvc`. The Linux,
+  macOS and Windows-ARM legs were dropped — nobody is shipped those builds, and
+  ARM Windows runs the x86-64 binary under emulation.
+
+### Removed
+
+- eframe's `persistence` feature, which was never used: window state is
+  persisted by `config::Config` (TOML) and annotations by
+  `dcm::annotation::AnnotationStore` (JSON). This also drops the `ron`,
+  `accesskit`, `base64`, `pollster`, `home` and `enumn` dependencies.
+
+### Performance
+
+- Release binary shrinks roughly 30% (8.0 MB → 5.6 MB measured on
+  macOS/arm64); the saving on Windows is larger still, since the `wgpu` build
+  there compiled the DX12 and Vulkan backends plus `naga`.
+
+### Known limitations
+
+- The shipped binary requires **Windows 10 or newer**. Rust 1.78 dropped
+  Windows 7/8.1 from the standard `*-pc-windows-msvc` targets, and this crate's
+  MSRV is 1.80; Windows 7 support would need the tier-3
+  `x86_64-win7-windows-msvc` target.
+
 ## [0.1.2] — 2026-08-03
 
 ### Added

@@ -162,3 +162,10 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,macos,windows,linux,images
 *.dcm
+
+# Local-only test fixtures (~500 MB, may contain a Python .venv).
+# tests/sample_data.rs skips cleanly when absent — never commit this.
+sample-data/
+
+# Generated knowledge-graph output.
+graphify-out/

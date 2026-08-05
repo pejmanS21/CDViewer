@@ -1,13 +1,13 @@
 # CI / CD
 
-CDViewer uses three GitHub Actions workflows under [`.github/workflows/`](../.github/workflows/).
+CDViewer uses four GitHub Actions workflows under [`.github/workflows/`](../.github/workflows/).
 This document explains what each one does, when it runs, and how to cut a
 release.
 
 | Workflow | File | Trigger | What it does |
 |---|---|---|---|
-| CI | [`ci.yml`](../.github/workflows/ci.yml) | `push` to `main`/`master`, every PR, `workflow_dispatch` | `cargo clippy -- -D warnings` + `cargo test` across 5 targets |
-| Release | [`release.yml`](../.github/workflows/release.yml) | Tags matching `v*` | Builds release binaries for 5 targets and publishes a GitHub Release |
+| CI | [`ci.yml`](../.github/workflows/ci.yml) | `push` to `main`/`master`, every PR, `workflow_dispatch` | `cargo clippy -- -D warnings` + `cargo test` on `x86_64-pc-windows-msvc` |
+| Release | [`release.yml`](../.github/workflows/release.yml) | Tags matching `v*` | Builds the `x86_64-pc-windows-msvc` binary and publishes a GitHub Release |
 | Security | [`security.yml`](../.github/workflows/security.yml) | `push`, PR, daily cron, `workflow_dispatch` | Gitleaks (secret scanning) + Semgrep (SAST) |
 | Docs | [`docs.yml`](../.github/workflows/docs.yml) | `push` to `main`/`master`, `workflow_dispatch` | Builds `cargo doc` and deploys to GitHub Pages |
 
@@ -18,28 +18,32 @@ and PR. The matrix is:
 
 | Target | Runner | Tests run? |
 |---|---|---|
-| `x86_64-unknown-linux-gnu` | `ubuntu-latest` | ✅ |
-| `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm` | ✅ |
-| `aarch64-apple-darwin` | `macos-14` | ✅ |
 | `x86_64-pc-windows-msvc` | `windows-latest` | ✅ |
-| `aarch64-pc-windows-msvc` | `windows-latest` | ❌ (cross-compiled, can't execute aarch64 on x64) |
 
-Each job:
+The single job:
 
-1. Installs Linux system deps (`libgtk-3-dev`, `libxkbcommon-dev`,
-   `libwayland-dev`, the xcb stack, `libssl-dev`, `pkg-config`) when on
-   Linux. Other platforms need nothing extra.
-2. Installs the stable toolchain via `dtolnay/rust-toolchain@stable` with
-   the target added.
-3. Caches `~/.cargo` and `target/` with `Swatinem/rust-cache@v2`, keyed by
-   target so jobs don't fight over the cache.
-4. Runs `cargo clippy --all-targets --all-features -- -D warnings`. The
-   `-D warnings` is a hard gate.
-5. Runs `cargo test --all-features` (except on the cross-compiled Windows
-   ARM job).
+1. Installs the stable toolchain via `dtolnay/rust-toolchain@stable` with
+   the target and `clippy` added.
+2. Caches `~/.cargo` and `target/` with `Swatinem/rust-cache@v2`, keyed by
+   target (`${{ matrix.target }}`).
+3. Runs `cargo clippy --all-targets --all-features --target <TARGET> -- -D warnings`.
+   The `-D warnings` is a hard gate.
+4. Runs `cargo test --all-features --target <TARGET>`.
 
-`fail-fast: false` so one platform's failure doesn't cancel the others —
-useful when debugging a target-specific issue.
+The matrix is kept (with `fail-fast: false`) even though it has one entry,
+so a target can be added back by appending a row.
+
+### Why Windows x86-64 only
+
+Windows x86-64 is the only target anyone is shipped: the viewer goes out on
+study CDs burned for Windows desktops. The Linux, macOS and Windows-ARM legs
+were removed because they burned CI minutes on platforms that never receive a
+build. Dropping `aarch64-pc-windows-msvc` loses nothing — ARM Windows runs the
+x86-64 binary under emulation.
+
+Local Linux development still needs the eframe system packages; see the
+`apt-get install` line in [`README.md`](../README.md). CI no longer installs
+them because no CI job runs on Linux any more (except the docs build).
 
 > **Integration tests auto-skip if `sample-data/` is absent**, so CI passes
 > without the fixtures being checked in. Locally, drop your own anonymised
@@ -51,25 +55,26 @@ useful when debugging a target-specific issue.
 [`release.yml`](../.github/workflows/release.yml) only fires on tags
 matching `v*`. The build matrix:
 
-| Target | Runner | Archive | Notes |
-|---|---|---|---|
-| `x86_64-unknown-linux-gnu` | `ubuntu-latest` | `.tar.gz` | |
-| `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm` | `.tar.gz` | Native ARM runner |
-| `aarch64-apple-darwin` | `macos-14` | `.tar.gz` | Apple Silicon |
-| `x86_64-pc-windows-msvc` | `windows-latest` | `.zip` | |
-| `aarch64-pc-windows-msvc` | `windows-latest` | `.zip` | Cross-compiled — MSVC ARM64 build tools ship with the VS install on `windows-latest` |
+| Target | Runner | Archive | Bin | Notes |
+|---|---|---|---|---|
+| `x86_64-pc-windows-msvc` | `windows-latest` | `.zip` | `dicom-viewer.exe` | The only shipped target |
 
-macOS x86_64 is intentionally not built — Apple Silicon plus Rosetta covers
-modern macOS users, and the runner is being retired. The matrix entry is
-commented out at the top of `release.yml`.
+Nothing else is built — see [Why Windows x86-64 only](#why-windows-x86-64-only)
+above. The staging script still carries a `.tar.gz` branch, unused while the
+matrix is Windows-only.
 
-### What each release job does
+### What the release job does
 
 1. Checks out the tagged commit.
-2. Installs Linux system deps when needed.
-3. Builds with `cargo build --release --locked --target <TARGET>`. The
-   `--locked` flag is why we commit `Cargo.lock`.
-4. Stages the artefact under `dist/release/dicom-viewer-<tag>-<target>/`,
+2. Builds with `cargo build --release --locked --target <TARGET>`. The
+   `--locked` flag is why we commit `Cargo.lock`. The MSVC C runtime is
+   statically linked via
+   [`.cargo/config.toml`](../.cargo/config.toml)
+   (`rustflags = ["-C", "target-feature=+crt-static"]` for the
+   `*-pc-windows-msvc` targets), so the shipped `.exe` runs without the
+   Visual C++ Redistributable installed — it costs a few hundred KB and
+   buys "double-click and it runs" on machines nobody can install onto.
+3. Stages the artefact under `dist/release/dicom-viewer-<tag>-<target>/`,
    bundling:
    - the binary,
    - [`dist/README.txt`](../dist/README.txt),
@@ -77,17 +82,17 @@ commented out at the top of `release.yml`.
    - [`LICENSE`](../LICENSE),
    - [`CHANGELOG.md`](../CHANGELOG.md),
    - [`dist/autorun.inf`](../dist/autorun.inf) (Windows only).
-5. Packs into `.tar.gz` (POSIX) or `.zip` (Windows) and uploads as a
-   workflow artefact.
+4. Packs into a `.zip` with `7z` and uploads it as a workflow artefact
+   (`if-no-files-found: error`).
 
 ### The release publication step
 
-After all five build jobs succeed, the `release` job:
+After the build job succeeds, the `release` job (on `ubuntu-latest`):
 
 1. Downloads every artefact (`merge-multiple: true`).
 2. Calls `softprops/action-gh-release@v2` with `generate_release_notes: true`
    and `fail_on_unmatched_files: true`.
-3. Attaches all five archives to a new GitHub Release for the tag.
+3. Attaches the archive to a new GitHub Release for the tag.
 
 GitHub's auto-generated notes come from PRs merged since the previous tag —
 they complement, not replace, the curated entries in
@@ -111,8 +116,8 @@ git push origin vX.Y.Z
 ```
 
 Pushing the tag triggers `release.yml`. Watch it in the **Actions** tab.
-The five build jobs run in parallel; the `release` job depends on all of
-them succeeding.
+The Windows build job runs first; the `release` job depends on it
+succeeding.
 
 If something goes wrong before the GitHub Release is created, you can
 delete the tag with `git push --delete origin vX.Y.Z`, fix the issue, and
@@ -128,7 +133,9 @@ the library crate and deploys it to GitHub Pages on every push to `main`.
 
 The flow:
 
-1. Install the eframe Linux system deps (same set as CI).
+1. Install the eframe Linux system deps (the docs job is the only one that
+   runs on Linux — same set as the `apt-get install` line in
+   [`README.md`](../README.md)).
 2. `cargo doc --no-deps --lib` with `RUSTDOCFLAGS="-D warnings"` — any
    broken intra-doc link fails the build.
 3. Stage `target/doc/` as `site/`, drop a `.nojekyll` marker so
@@ -197,9 +204,11 @@ check away from `Cargo.lock`, `sample-data/`, `target/`, and
 ## Caching
 
 `Swatinem/rust-cache@v2` caches `~/.cargo/registry`, `~/.cargo/git`, and
-`target/` keyed by target and `Cargo.lock`. First runs are slow (~10 min on
-Linux/macOS, ~15 min on Windows for a full release build). Cached runs are
-typically 2–4 minutes for CI and 5–8 minutes for release builds.
+`target/` keyed by target and `Cargo.lock` (`${{ matrix.target }}` in CI,
+`${{ matrix.target }}-release` in the release build, `docs` in the docs
+build). A first run on Windows is slow (~15 min for a full release build).
+Cached runs are typically 2–4 minutes for CI and 5–8 minutes for release
+builds.
 
 If you suspect a corrupted cache, bump the suffix in the `key:` field of
 the relevant workflow (e.g. `${{ matrix.target }}-release` → `…-release-v2`).
